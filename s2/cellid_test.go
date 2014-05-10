@@ -1,6 +1,7 @@
 package s2
 
 import (
+	"sort"
 	"testing"
 
 	"code.google.com/p/gos2/s1"
@@ -148,6 +149,54 @@ func TestEdgeNeighbors(t *testing.T) {
 			if nbr != want[i] {
 				t.Errorf("CellID(%d).EdgeNeighbors()[%d] = %v, want %v", id, i, nbr, want[i])
 			}
+		}
+	}
+}
+
+func TestAppendVertexNeighbors(t *testing.T) {
+	var want CellID
+	nbrs := []CellID{}
+
+	// Check the vertex neighbors of the center of face 2 at level 5
+	cellIDFromPoint(PointFromCoords(0, 0, 1)).AppendVertexNeighbors(5, &nbrs)
+	sort.Sort(ByCellID(nbrs))
+	for i := 0; i < 4; i++ {
+		ioff := 0
+		joff := 0
+		if i < 2 {
+			ioff = 1
+		}
+		if i == 0 || i == 3 {
+			joff = 1
+		}
+
+		want = cellIDFromFaceIJ(2, (1<<29)-ioff, (1<<29)-joff).Parent(5)
+		if nbrs[i] != want {
+			t.Errorf("%v != %v", nbrs[i], want)
+		}
+	}
+
+	nbrs = []CellID{}
+
+	// Check the vertex neighbors of the corner of faces 0, 4, and 5.
+	id := CellIDFromFacePosLevel(0, 0, MaxCellLevel)
+	id.AppendVertexNeighbors(0, &nbrs)
+	sort.Sort(ByCellID(nbrs))
+	if len(nbrs) != 3 {
+		t.Errorf("len(%v) == %d, want 3", nbrs, len(nbrs))
+	}
+
+	tests := []struct {
+		want CellID
+	}{
+		{CellIDFromFacePosLevel(0, 0, 0)},
+		{CellIDFromFacePosLevel(4, 0, 0)},
+		{CellIDFromFacePosLevel(5, 0, 0)},
+	}
+
+	for i, test := range tests {
+		if nbrs[i] != test.want {
+			t.Errorf("got %v, want %v", nbrs[i], want)
 		}
 	}
 }

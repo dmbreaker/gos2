@@ -273,3 +273,22 @@ func TestIdentities(t *testing.T) {
 		}
 	}
 }
+
+func TestLessThan(t *testing.T) {
+	tests := []struct {
+		v1, v2 Vector
+		want   bool
+	}{
+		{Vector{-1, 0, 0}, Vector{0, 0, 0}, true},
+		{Vector{0, 0, 0}, Vector{-1, 0, 0}, false},
+		{Vector{0, -1, 0}, Vector{0, 0, 0}, true},
+		{Vector{0, 0, 0}, Vector{0, -1, 0}, false},
+		{Vector{0, 0, -1}, Vector{0, 0, 0}, true},
+		{Vector{0, 0, 0}, Vector{0, 0, -1}, false},
+	}
+	for _, test := range tests {
+		if test.v1.LessThan(test.v2) != test.want {
+			t.Errorf("%v < %v != %b", test.v1, test.v2, test.want)
+		}
+	}
+}

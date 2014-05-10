@@ -22,11 +22,20 @@ var (
 // FullRect returns the full rectangle.
 func FullRect() Rect { return Rect{validRectLatRange, validRectLngRange} }
 
+func EmptyRect() Rect { return Rect{r1.EmptyInterval(), s1.EmptyInterval()} }
+
 // RectFromLatLng constructs a rectangle containing a single point p.
 func RectFromLatLng(p LatLng) Rect {
 	return Rect{
 		Lat: r1.Interval{p.Lat.Radians(), p.Lat.Radians()},
 		Lng: s1.Interval{p.Lng.Radians(), p.Lng.Radians()},
+	}
+}
+
+func RectFromPointPair(p1, p2 LatLng) Rect {
+	return Rect{
+		Lat: r1.IntervalFromPointPair(p1.Lat.Radians(), p2.Lat.Radians()),
+		Lng: s1.IntervalFromPointPair(p1.Lng.Radians(), p2.Lng.Radians()),
 	}
 }
 
@@ -62,6 +71,9 @@ func (r Rect) IsFull() bool { return r.Lat.Equal(validRectLatRange) && r.Lng.IsF
 
 // IsPoint reports whether the rectangle is a single point.
 func (r Rect) IsPoint() bool { return r.Lat.Lo == r.Lat.Hi && r.Lng.Lo == r.Lng.Hi }
+
+// Equal makes sure two rectangles are equal.
+func (r Rect) Equal(other Rect) bool { return r.Lat.Equal(other.Lat) && r.Lng.Equal(other.Lng) }
 
 // Lo returns one corner of the rectangle.
 func (r Rect) Lo() LatLng {
@@ -100,6 +112,17 @@ func (r Rect) AddPoint(ll LatLng) Rect {
 	return Rect{
 		Lat: r.Lat.AddPoint(ll.Lat.Radians()),
 		Lng: r.Lng.AddPoint(ll.Lng.Radians()),
+	}
+}
+
+func (r Rect) Contains(ll LatLng) bool {
+	return r.Lat.Contains(ll.Lat.Radians()) && r.Lng.Contains(ll.Lng.Radians())
+}
+
+func (r Rect) Union(other Rect) Rect {
+	return Rect{
+		Lat: r.Lat.Union(other.Lat),
+		Lng: r.Lng.Union(other.Lng),
 	}
 }
 

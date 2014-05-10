@@ -1,6 +1,7 @@
 package s2
 
 import (
+	"code.google.com/p/gos2/r3"
 	"math"
 	"testing"
 )
@@ -142,5 +143,74 @@ func TestApproxEqual(t *testing.T) {
 		if got := p1.ApproxEqual(p2); got != test.want {
 			t.Errorf("%v.ApproxEqual(%v), got %v want %v", p1, p2, got, test.want)
 		}
+	}
+}
+
+func TestColinearPoints(t *testing.T) {
+	// The following points happen to be *exactly colinear* along a line
+	// that is approximately tangent to the surface of the unit sphere.
+	// In fact, "c" is the exact midpoint of the line segment "ab". All of
+	// these points are close enough to unit length to satisfy IsUnitLength.
+	a := Point{r3.Vector{0.72571927877036835, 0.46058825605889098, 0.51106749730504852}}
+	b := Point{r3.Vector{0.7257192746638208, 0.46058826573818168, 0.51106749441312738}}
+	c := Point{r3.Vector{0.72571927671709457, 0.46058826089853633, 0.51106749585908795}}
+	c_sub_a := c.Sub(a.Vector)
+	b_sub_c := b.Sub(c.Vector)
+	if c_sub_a != b_sub_c {
+		t.Errorf("%v != %v", c_sub_a, b_sub_c)
+	}
+
+	if RobustCCW(a, b, c) == 0 {
+		t.Errorf("%v == %v", RobustCCW(a, b, c), 0)
+	}
+
+	if RobustCCW(a, b, c) != RobustCCW(b, c, a) {
+		t.Errorf("%v != %v", RobustCCW(a, b, c), RobustCCW(b, c, a))
+	}
+
+	if RobustCCW(a, b, c) != -RobustCCW(c, b, a) {
+		t.Errorf("%v != %v", RobustCCW(a, b, c), -RobustCCW(c, b, a))
+	}
+
+	// The points "x1" and "x2" are exactly proportional, i.e. they both
+	// lie on a common line through the origin. Both points are considered
+	// to be normalized, and in fact they both satisfy (x == x.Normalize()).
+	// Therefore the triangle (x1, x2, -x1) consists of three distinct
+	// points that all lie on a common line through the origin.
+	x1 := Point{r3.Vector{0.99999999999999989, 1.4901161193847655e-08, 0}}
+	x2 := Point{r3.Vector{1, 1.4901161193847656e-08, 0}}
+	neg_x1 := Point{x1.Neg()}
+	if x1.Vector != x1.Normalize() {
+		t.Errorf("%v != %v", x1, x1.Normalize())
+	}
+	if x2.Vector != x2.Normalize() {
+		t.Errorf("%v != %v", x2, x2.Normalize())
+	}
+
+	if RobustCCW(x1, x2, neg_x1) == 0 {
+		t.Errorf("%v == %v", RobustCCW(x1, x2, neg_x1), 0)
+	}
+
+	if RobustCCW(x1, x2, neg_x1) != RobustCCW(x2, neg_x1, x1) {
+		t.Errorf("%v != %v", RobustCCW(x1, x2, neg_x1), RobustCCW(x2, neg_x1, x1))
+	}
+
+	if RobustCCW(x1, x2, neg_x1) != -RobustCCW(neg_x1, x2, x1) {
+		t.Errorf("%v != %v", RobustCCW(x1, x2, neg_x1), -RobustCCW(neg_x1, x2, x1))
+	}
+
+	// Here are two more points that are distinct, exactly proportional,
+	// and that satisfy (x == x.Normalize()).
+	x3 := PointFromCoords(1, 1, 1)
+	x4 := Point{x3.Mul(0.99999999999999989)}
+	neg_x3 := Point{x3.Neg()}
+	if x3.Vector != x3.Normalize() {
+		t.Errorf("%v != %v", x3, x3.Normalize())
+	}
+	if x4.Vector != x4.Normalize() {
+		t.Errorf("%v != %v", x4, x4.Normalize())
+	}
+	if RobustCCW(x3, x4, neg_x3) == 0 {
+		t.Errorf("%v == %v", RobustCCW(x3, x4, neg_x3), 0)
 	}
 }
