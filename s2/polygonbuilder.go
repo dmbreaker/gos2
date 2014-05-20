@@ -47,12 +47,12 @@ type PointIndex struct {
 }
 
 func NewPointIndex(vertex_radius, edge_fraction float64) PointIndex {
-	maxLevel := MinWidth.MaxLevel(2 * float64(vertex_radius))
+	max_level := MinWidth.MaxLevel(2 * vertex_radius)
 	return PointIndex{
 		map_:          map[CellID][]Point{Sentinel(): []Point{Point{}}},
 		vertex_radius: vertex_radius,
 		edge_fraction: edge_fraction,
-		level:         int(math.Min(float64(maxLevel), MaxCellLevel-1)),
+		level:         int(math.Min(float64(max_level), MaxCellLevel-1)),
 	}
 }
 
@@ -73,7 +73,7 @@ func (idx PointIndex) FindNearbyPoint(v0, v1 Point, out *Point) bool {
 	cellIDFromPoint(v1).AppendVertexNeighbors(level, &ids)
 
 	// Sort the cell ids so that we can skip duplicates in the loop below.
-	sort.Sort(ByCellID(ids))
+	sort.Sort(byID(ids))
 
 	// TODO: map_ won't work as is. You need to sort the mapped values
 	// before using them.

@@ -167,7 +167,7 @@ func (idx *LoopIndex) EdgesInChildrenCells(
 		keys = append(keys, k)
 	}
 
-	sort.Sort(ByCellID(keys))
+	sort.Sort(byID(keys))
 
 	rewind := false
 
@@ -409,6 +409,22 @@ func NewLoopFromPath(vertices []Point) *Loop {
 	return loop
 }
 
+func NewLoopFromCell(cell Cell) *Loop {
+	loop := &Loop{
+		vertices: make([]Point, 4),
+		bound:    cell.RectBound(),
+		depth:    0,
+		num_find_vertex_calls: 0,
+	}
+	for i := 0; i < 4; i++ {
+		loop.vertices[i] = cell.Vertex(i)
+	}
+	loop.index = NewLoopIndex(loop)
+	loop.InitOrigin()
+	loop.InitBound()
+	return loop
+}
+
 func (l *Loop) Clone() *Loop {
 	loop := &Loop{
 		vertices:      make([]Point, len(l.vertices)),
@@ -420,6 +436,37 @@ func (l *Loop) Clone() *Loop {
 	copy(loop.vertices, l.vertices)
 	loop.index = NewLoopIndex(loop)
 	return loop
+}
+
+func (l Loop) Bound() Rect {
+	return l.bound
+}
+
+func (l Loop) CapBound() Cap {
+	return l.bound.CapBound()
+}
+
+func (l *Loop) FindVertex(p Point) int {
+	l.num_find_vertex_calls++
+	if len(l.vertices) < 10 || l.num_find_vertex_calls < 20 {
+		// Exhaustive search
+		for i := 1; i <= len(l.vertices); i++ {
+			if *l.vertex(i) == p {
+				return i
+			}
+		}
+		return -1
+	}
+	if len(l.vertex_to_index) == 0 { // We haven't computed it yet.
+		for i := len(l.vertices); i > 0; i-- {
+			l.vertex_to_index[*l.vertex(i)] = i
+		}
+	}
+
+	if idx, ok := l.vertex_to_index[p]; ok {
+		return idx
+	}
+	return -1
 }
 
 func (l *Loop) Invert() {
@@ -563,6 +610,61 @@ func (l Loop) TurningAngle() float64 {
 	return float64(dir) * angle
 }
 
+func (l Loop) ContainsCell(cell Cell) bool {
+	if !l.bound.ContainsPoint(cell.Center()) {
+		return false
+	}
+	cell_loop := NewLoopFromCell(cell)
+	return l.ContainsLoop(cell_loop)
+}
+
+func (a Loop) ContainsLoop(b *Loop) bool {
+	// For this loop A to contain the given loop B, all of the following
+	// must be true:
+	//
+	//  (1) There are no edge crossings between A and B except at vertices.
+	//
+	//  (2) At every vertex that is shared between A and B, the local edge
+	//      ordering implies that A contains B.
+	//
+	//  (3) If there are no shared vertices, then A must contain a vertex
+	//      of B and B must not contain a vertex of A. (An arbitrary vertex
+	//      may be chosen in each case.)
+	//
+	// The second part of (3) is necessary to detect the case of two loops
+	// whose union is the entire sphere, i.e. two loops that contain each
+	// other's boundaries but not each other's interiors.
+	if !a.bound.ContainsRect(b.bound) {
+		return false
+	}
+
+	// Unless there are shared vertices, we need to check whether A
+	// contains a vertex of B. Since shared vertices are rare, it is more
+	// efficient to do this test up front as a quick rejection test.
+	if !a.Contains(*b.vertex(0)) && a.FindVertex(*b.vertex(0)) < 0 {
+		return false
+	}
+
+	// Now check whether there are any edge crossings, and also check the
+	// loop relationship at any shared vertices.
+	var wedge ContainsWedgeProcessor
+	if a.AreBoundariesCrossing(b, &wedge) || wedge.doesnt_contain {
+		return false
+	}
+
+	// At this point we know that the boundaries of A and B do not
+	// intersect, and that A contains a vertex of B. However, we still
+	// need to check for the case mentioned above, where (A union B) is
+	// the entire sphere. Normally this check is very cheap due to the
+	// bounding box precondition.
+	if a.bound.Union(b.bound).IsFull() {
+		if b.Contains(*a.vertex(0)) && b.FindVertex(*a.vertex(0)) < 0 {
+			return false
+		}
+	}
+	return true
+}
+
 func (l Loop) Contains(p Point) bool {
 	if !l.bound.Contains(LatLngFromPoint(p)) {
 		return false
@@ -589,4 +691,124 @@ func (l Loop) Contains(p Point) bool {
 		inside = inside != crosser.EdgeOrVertexCrossing(l.vertex(ai+1))
 	}
 	return inside
+}
+
+func (l *Loop) MayIntersect(cell Cell) bool {
+	if !l.bound.Intersects(cell.RectBound()) {
+		return false
+	}
+	return NewLoopFromCell(cell).Intersects(l)
+}
+
+type WedgeProcessor interface {
+	ProcessWedge(a0, ab1, a2, b0, b2 Point) bool
+}
+
+// WedgeProcessor to be used to check if loop A intersects loop B.
+// Intersects() then returns true when A and B have at least one pair
+// of associated wedges that intersect.
+type IntersectsWedgeProcessor struct {
+	intersects bool
+}
+
+func (p *IntersectsWedgeProcessor) ProcessWedge(a0, ab1, a2, b0, b2 Point) bool {
+	p.intersects = WedgeIntersects(a0, ab1, a2, b0, b2)
+	return p.intersects
+}
+
+// WedgeProcessor to be used to check if loop A contains loop B.
+// DoesntContain() then returns true if there is a wedge of B not contained
+// in the associated wedge of A (and hence loop B is not contained in loop A).
+type ContainsWedgeProcessor struct {
+	doesnt_contain bool
+}
+
+func (p *ContainsWedgeProcessor) ProcessWedge(a0, ab1, a2, b0, b2 Point) bool {
+	p.doesnt_contain = !WedgeContains(a0, ab1, a2, b0, b2)
+	return p.doesnt_contain
+}
+
+// This method checks all edges of this loop (A) for intersection against
+// all edges of B. If there is any shared vertex, the wedges centered at this
+// vertex are sent to wedge_processor.
+//
+// Returns true only when the edges intersect in the sense of RobustCrossing,
+// returns false immediately when the wedge_processor returns true: this means
+// the wedge processor knows the value of the property that the caller wants
+// to compute, and no further inspection is needed. For instance, if the
+// property is "loops intersect", then a wedge intersection is all it takes
+// to return true.
+//
+// See Intersects().
+func (a *Loop) AreBoundariesCrossing(b *Loop, wedge_processor WedgeProcessor) bool {
+	a.index.PredictAdditionalCalls(len(b.vertices))
+	it := NewLoopIndexIterator(&a.index)
+	for j := 0; j < len(b.vertices); j++ {
+		crosser := NewEdgeCrosser(b.vertex(j), b.vertex(j+1), b.vertex(0))
+		prev_index := -2
+		for it.GetCandidates(*b.vertex(j), *b.vertex(j + 1)); !it.Done(); it.Next() {
+			ai := it.Index()
+			if prev_index != ai-1 {
+				crosser.RestartAt(a.vertex(ai))
+			}
+			prev_index = ai
+			crossing := crosser.RobustCrossing(a.vertex(ai + 1))
+			if crossing < 0 {
+				continue
+			}
+			if crossing > 0 {
+				return true
+			}
+			// We only need to check each shared vertex once, so we
+			// only consider the case where
+			// a.vertex(ai+1) == b.vertex(j+1).
+			if *a.vertex(ai + 1) == *b.vertex(j + 1) &&
+				wedge_processor.ProcessWedge(*a.vertex(ai), *a.vertex(ai + 1), *a.vertex(ai + 2),
+					*b.vertex(j), *b.vertex(j + 1)) {
+				return false
+			}
+		}
+	}
+	return false
+}
+
+func (a *Loop) Intersects(b *Loop) bool {
+	// a.Intersects(b) if and only if !a.Complement().Contains(b).
+	// This code is similar to Contains(), but is optimized for the case
+	// where both loops enclose less than half of the sphere.
+
+	// The largest of the two loops should be edgeindex'd.
+	if len(b.vertices) > len(a.vertices) {
+		return b.Intersects(a)
+	}
+
+	if !a.bound.Intersects(b.bound) {
+		return false
+	}
+
+	// Unless there are shared vertices, we need to check whether A
+	// contains a vertex of B. Since shared vertices are rare, it is more
+	// efficient to do this test up front as a quick acceptance test.
+	if a.Contains(*b.vertex(0)) && a.FindVertex(*b.vertex(0)) < 0 {
+		return true
+	}
+
+	// Now check whether there are any edge crossings, and also check the
+	// loop relationship at any shared vertices.
+	var wedge_processor IntersectsWedgeProcessor
+	if a.AreBoundariesCrossing(b, &wedge_processor) || wedge_processor.intersects {
+		return true
+	}
+
+	// We know that A does not contain a vertex of B, and that there are
+	// no edge crossings. Therefore the only way that A can intersect B is
+	// if B entirely contains A. We can check this by testing whether B
+	// contains an arbitrary non-shared vertex of A. Note that this check
+	// is usually cheap because of the bounding box precondition.
+	if b.bound.ContainsRect(a.bound) {
+		if b.Contains(*a.vertex(0)) && b.FindVertex(*a.vertex(0)) < 0 {
+			return true
+		}
+	}
+	return false
 }

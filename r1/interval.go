@@ -26,6 +26,15 @@ func IntervalFromPointPair(p1, p2 float64) Interval {
 	}
 }
 
+func (i Interval) Bound(k int) float64 {
+	switch k {
+	case 0:
+		return i.Lo
+	default:
+		return i.Hi
+	}
+}
+
 // IsEmpty reports whether the interval is empty.
 func (i Interval) IsEmpty() bool { return i.Lo > i.Hi }
 

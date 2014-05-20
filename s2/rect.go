@@ -63,6 +63,52 @@ func (r Rect) IsValid() bool {
 		r.Lat.IsEmpty() == r.Lng.IsEmpty()
 }
 
+func (r Rect) CapBound() Cap {
+	// We consider two possible bounding caps, one whose axis passes
+	// through the center of the lat-lng rectangle and one whose axis
+	// is the north or south pole. We return the smaller of the two caps.
+	if r.IsEmpty() {
+		return EmptyCap()
+	}
+	var poleZ float64
+	var poleAngle s1.Angle
+	if r.Lat.Lo+r.Lat.Hi < 0 {
+		// South pole axis yields smaller cap.
+		poleZ = -1
+		poleAngle = s1.Angle(math.Pi/2 + r.Lat.Hi)
+	} else {
+		poleZ = 1
+		poleAngle = s1.Angle(math.Pi/2 - r.Lat.Lo)
+	}
+	poleCap := CapFromCenterAngle(PointFromCoords(0, 0, poleZ),
+		s1.Angle(poleAngle.Radians()))
+
+	// For bounding rectangles that span 180 degrees or less in longitude,
+	// the maximum cap size is achieved at one of the rectangle vertices.
+	// For rectangles that are larger than 180 degrees, we punt and always
+	// return a bounding cap centered at one of the two poles.
+	lngSpan := r.Lng.Hi - r.Lng.Lo
+	if math.Remainder(lngSpan, 2*math.Pi) >= 0 {
+		if lngSpan < 2*math.Pi {
+			zeroAngle := s1.Angle(0)
+			midCap := CapFromCenterAngle(PointFromLatLng(r.Center()),
+				s1.Angle(zeroAngle.Radians()))
+			for k := 0; k < 4; k++ {
+				midCap.AddPoint(PointFromLatLng(r.Vertex(k)))
+			}
+			if midCap.height < poleCap.height {
+				return midCap
+			}
+		}
+	}
+	return poleCap
+}
+
+func (r Rect) Vertex(k int) LatLng {
+	// Twiddle bits to return the points in CCW order (SW, SE, NE, NW).
+	return LatLngFromRadians(r.Lat.Bound(k>>1), r.Lng.Bound((k>>1)^(k&1)))
+}
+
 // IsEmpty reports whether the rectangle is empty.
 func (r Rect) IsEmpty() bool { return r.Lat.IsEmpty() }
 
@@ -117,6 +163,18 @@ func (r Rect) AddPoint(ll LatLng) Rect {
 
 func (r Rect) Contains(ll LatLng) bool {
 	return r.Lat.Contains(ll.Lat.Radians()) && r.Lng.Contains(ll.Lng.Radians())
+}
+
+func (r Rect) ContainsPoint(p Point) bool {
+	return r.Contains(LatLngFromPoint(p))
+}
+
+func (r Rect) ContainsRect(other Rect) bool {
+	return r.Lat.ContainsInterval(other.Lat) && r.Lng.ContainsInterval(other.Lng)
+}
+
+func (r Rect) Intersects(other Rect) bool {
+	return r.Lat.Intersects(other.Lat) && r.Lng.Intersects(other.Lng)
 }
 
 func (r Rect) Union(other Rect) Rect {

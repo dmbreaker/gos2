@@ -51,6 +51,15 @@ func EmptyInterval() Interval { return Interval{math.Pi, -math.Pi} }
 // FullInterval returns a full interval.
 func FullInterval() Interval { return Interval{-math.Pi, math.Pi} }
 
+func (i Interval) Bound(k int) float64 {
+	switch k {
+	case 0:
+		return i.Lo
+	default:
+		return i.Hi
+	}
+}
+
 // IsValid reports whether the interval is valid.
 func (i Interval) IsValid() bool {
 	return (math.Abs(i.Lo) <= math.Pi && math.Abs(i.Hi) <= math.Pi &&

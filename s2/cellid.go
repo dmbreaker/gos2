@@ -18,12 +18,6 @@ import (
 // valid cell ID, the second as greater than any valid cell ID.
 type CellID uint64
 
-type ByCellID []CellID
-
-func (a ByCellID) Len() int           { return len(a) }
-func (a ByCellID) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByCellID) Less(i, j int) bool { return a[i] < a[j] }
-
 // TODO(dsymonds): Some of these constants should probably be exported.
 const (
 	faceBits     = 3
@@ -140,8 +134,18 @@ func (ci CellID) ChildPosition(level int) int {
 	return int(uint64(ci)>>uint64(2*(maxLevel-level)+1)) & 3
 }
 
+func (ci CellID) childBegin() CellID {
+	lsb := ci.lsb()
+	return CellID(uint64(ci) - lsb + lsb>>2)
+}
+
 func (ci CellID) childBeginForLevel(level int) CellID {
 	return CellID(uint64(ci) - ci.lsb() + lsbForLevel(level))
+}
+
+func (ci CellID) childEnd() CellID {
+	lsb := ci.lsb()
+	return CellID(uint64(ci) + lsb + lsb>>2)
 }
 
 func (ci CellID) childEndForLevel(level int) CellID {
@@ -149,7 +153,7 @@ func (ci CellID) childEndForLevel(level int) CellID {
 }
 
 func (ci CellID) next() CellID {
-	return CellID(uint64(ci) + (ci.lsb() << 1))
+	return CellID(uint64(ci) + ci.lsb()<<1)
 }
 
 func lsbForLevel(level int) uint64 { return 1 << uint64(2*(maxLevel-level)) }
@@ -297,6 +301,13 @@ func (ci CellID) faceSiTi() (face, si, ti int) {
 		}
 	}
 	return face, 2*i + delta, 2*j + delta
+}
+
+func (ci CellID) centerUV() (u, v float64) {
+	_, si, ti := ci.faceSiTi()
+	u = (0.5 / maxSize) * float64(si)
+	v = (0.5 / maxSize) * float64(ti)
+	return
 }
 
 // faceIJOrientation uses the global lookupIJ table to unfiddle the bits of ci.

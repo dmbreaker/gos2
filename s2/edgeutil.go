@@ -5,6 +5,23 @@ import (
 	"math"
 )
 
+func WedgeIntersects(a0, ab1, a2, b0, b2 Point) bool {
+	// For A not to intersect B (where each loop interior is defined to be
+	// its left side), the CCW edge order around ab1 must be a0 b2 b0 a2.
+	// note that it's important to write these conditions as negatives
+	// (!OrderedCCW(a,b,c,o) rather than OrderedCCW(c,b,a,o)) to get
+	// correct results when two vertices are the same.
+	return !OrderedCCW(a0, b2, b0, ab1) && OrderedCCW(b0, a2, a0, ab1)
+}
+
+func WedgeContains(a0, ab1, a2, b0, b2 Point) bool {
+	// For A to contain B (where each loop interior is defined to be its
+	// left side), the CCW edge order around ab1 must be a2 b2 b0 a0. We
+	// split this test into two parts that test three vertices each.
+	return OrderedCCW(a2, b2, b0, ab1) && OrderedCCW(b0, a0, a2, ab1)
+}
+
+// This is named GetDistance() in the C++ API.
 func (x Point) DistanceToEdgeWithNormal(a, b, a_cross_b Point) s1.Angle {
 	// There are three cases. If X is located in the spherical wedge
 	// defined by A, B, and the axis A x B, then the closest point is on
@@ -31,6 +48,7 @@ func (x Point) DistanceToEdgeWithNormal(a, b, a_cross_b Point) s1.Angle {
 	return s1.Angle(2 * math.Asin(math.Min(1.0, 0.5*math.Sqrt(linear_dist2))))
 }
 
+// This is named GetDistance() in the C++ API.
 func (x Point) DistanceToEdge(a, b Point) s1.Angle {
 	return x.DistanceToEdgeWithNormal(a, b, a.PointCross(b))
 }
