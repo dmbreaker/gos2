@@ -84,7 +84,7 @@ func FullCap() Cap {
 	return CapFromCenterHeight(centerPoint, fullHeight)
 }
 
-func (c Cap) AddPoint(p Point) {
+func (c *Cap) AddPoint(p Point) {
 	// Compute the squared chord length, then covert it into a height.
 	if c.IsEmpty() {
 		c.center = p
@@ -134,7 +134,7 @@ func (c Cap) Area() float64 {
 
 func (c Cap) MayIntersect(cell Cell) bool {
 	// If the cap contains any cell vertex, return true.
-	vertices := make([]Point, 4)
+	vertices := [4]Point{}
 	for k := 0; k < 4; k++ {
 		vertices[k] = cell.Vertex(k)
 		if c.ContainsPoint(vertices[k]) {
@@ -158,7 +158,7 @@ func (c Cap) ContainsCell(cell Cell) bool {
 	// We check the vertices before taking the Complement because we can't
 	// accurately represent the complement of a very small cap (a height
 	// of 2-epsilon is rounded off to 2).
-	vertices := make([]Point, 4)
+	vertices := [4]Point{}
 	for k := 0; k < 4; k++ {
 		vertices[k] = cell.Vertex(k)
 		if !c.ContainsPoint(vertices[k]) {
@@ -181,7 +181,7 @@ func (c Cap) Intersects(other Cap) bool {
 	return c.Radius()+other.Radius() >= c.center.Distance(other.center)
 }
 
-func (c Cap) IntersectsCell(cell Cell, vertices []Point) bool {
+func (c Cap) IntersectsCell(cell Cell, vertices [4]Point) bool {
 	// Return true if this cap intersects any point of 'cell' excluding
 	// its vertices (which are assumed to already have been checked).
 

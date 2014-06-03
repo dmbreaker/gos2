@@ -145,5 +145,5 @@ func (cu CellUnion) IntersectsCellID(id CellID) bool {
 type byID []CellID
 
 func (cu byID) Len() int           { return len(cu) }
-func (cu byID) Less(i, j int) bool { return cu[i] < cu[j] }
+func (cu byID) Less(i, j int) bool { return uint64(cu[i]) < uint64(cu[j]) }
 func (cu byID) Swap(i, j int)      { cu[i], cu[j] = cu[j], cu[i] }

@@ -65,36 +65,45 @@ func (m Metric) MaxLevel(value float64) int {
 }
 
 var (
-	MinAngleSpan LengthMetric
-	MaxAngleSpan LengthMetric
-	AvgAngleSpan LengthMetric
-	MinWidth     LengthMetric
-	MaxWidth     LengthMetric
-	AvgWidth     LengthMetric
-	MinEdge      LengthMetric
-	MaxEdge      LengthMetric
-	AvgEdge      LengthMetric
-	MinDiag      LengthMetric
-	MaxDiag      LengthMetric
-	AvgDiag      LengthMetric
-	AvgArea      AreaMetric
+	MinAngleSpan  LengthMetric
+	MaxAngleSpan  LengthMetric
+	AvgAngleSpan  LengthMetric
+	MinWidth      LengthMetric
+	MaxWidth      LengthMetric
+	AvgWidth      LengthMetric
+	MinEdge       LengthMetric
+	MaxEdge       LengthMetric
+	AvgEdge       LengthMetric
+	MinDiag       LengthMetric
+	MaxDiag       LengthMetric
+	AvgDiag       LengthMetric
+	MinArea       AreaMetric
+	MaxArea       AreaMetric
+	AvgArea       AreaMetric
+	MaxEdgeAspect float64
+	MaxDiagAspect float64
 )
 
 // All of the values below were obtained by a combination of hand analysis and
 // Mathematica.
-// TODO: implement tangent and quadratic projections.
+// Note that I've only implemented the quadratic projections since stToUV uses
+// the quadratic transform.
 func init() {
-	MinAngleSpan = NewLengthMetric(1)
-	MaxAngleSpan = NewLengthMetric(2)
-	AvgAngleSpan = NewLengthMetric(math.Pi / 2)      // 1.571 (true for all projections)
-	MinWidth = NewLengthMetric(math.Sqrt(2. / 3))    // 0.816
-	MaxWidth = NewLengthMetric(MaxAngleSpan.Deriv)   // (true for all projections)
-	AvgWidth = NewLengthMetric(1.411459345844456965) // 1.411
-	MinEdge = NewLengthMetric(2 * math.Sqrt2 / 3)    // 0.943
-	MaxEdge = NewLengthMetric(MaxAngleSpan.Deriv)    // (true for all projections)
-	AvgEdge = NewLengthMetric(1.440034192955603643)  // 1.440
-	MinDiag = NewLengthMetric(2 * math.Sqrt2 / 3)    // 0.943
-	MaxDiag = NewLengthMetric(2 * math.Sqrt2)        // 2.828
-	AvgDiag = NewLengthMetric(2.031817866418812674)  // 2.032
-	AvgArea = NewAreaMetric(4 * math.Pi / 6)         // 2.094 (true for all projections)
+	MinAngleSpan = NewLengthMetric(4. / 3)               // 1.333
+	MaxAngleSpan = NewLengthMetric(1.704897179199218452) // 1.705
+	AvgAngleSpan = NewLengthMetric(math.Pi / 2)          // 1.571 (true for all projections)
+	MinWidth = NewLengthMetric(2 * math.Sqrt(2) / 3)     // 0.943
+	MaxWidth = NewLengthMetric(MaxAngleSpan.Deriv)       // (true for all projections)
+	AvgWidth = NewLengthMetric(1.434523672886099389)     // 1.435
+	MinEdge = NewLengthMetric(2 * math.Sqrt(2) / 3)      // 0.943
+	MaxEdge = NewLengthMetric(MaxAngleSpan.Deriv)        // (true for all projections)
+	AvgEdge = NewLengthMetric(1.459213746386106062)      // 1.459
+	MinDiag = NewLengthMetric(8 * math.Sqrt(2) / 9)      // 1.257
+	MaxDiag = NewLengthMetric(2.438654594434021032)      // 2.439
+	AvgDiag = NewLengthMetric(2.060422738998471683)      // 2.060
+	MinArea = NewAreaMetric(8 * math.Sqrt(2) / 9)        // 1.257
+	MaxArea = NewAreaMetric(2.635799256963161491)        // 2.636
+	AvgArea = NewAreaMetric(4 * math.Pi / 6)             // 2.094 (true for all projections)
+	MaxEdgeAspect = 1.442615274452682920                 // 1.443
+	MaxDiagAspect = math.Sqrt(3)                         // 1.732 (true for all projections)
 }

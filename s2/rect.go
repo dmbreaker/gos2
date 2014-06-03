@@ -173,6 +173,14 @@ func (r Rect) ContainsRect(other Rect) bool {
 	return r.Lat.ContainsInterval(other.Lat) && r.Lng.ContainsInterval(other.Lng)
 }
 
+func (r Rect) ContainsCell(cell Cell) bool {
+	return r.ContainsRect(cell.RectBound())
+}
+
+func (r Rect) MayIntersect(cell Cell) bool {
+	return r.Intersects(cell.RectBound())
+}
+
 func (r Rect) Intersects(other Rect) bool {
 	return r.Lat.Intersects(other.Lat) && r.Lng.Intersects(other.Lng)
 }

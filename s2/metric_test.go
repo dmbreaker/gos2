@@ -10,18 +10,18 @@ func TestDefaults(t *testing.T) {
 		metric LengthMetric
 		want   float64
 	}{
-		{MinAngleSpan, 1},
-		{MaxAngleSpan, 2},
+		{MinAngleSpan, 4. / 3},
+		{MaxAngleSpan, 1.704897179199218452},
 		{AvgAngleSpan, math.Pi / 2},
-		{MinWidth, math.Sqrt(2. / 3)},
+		{MinWidth, 2 * math.Sqrt(2) / 3},
 		{MaxWidth, MaxAngleSpan.Deriv},
-		{AvgWidth, 1.411459345844456965},
+		{AvgWidth, 1.434523672886099389},
 		{MinEdge, 2 * math.Sqrt(2) / 3},
 		{MaxEdge, MaxAngleSpan.Deriv},
-		{AvgEdge, 1.440034192955603643},
-		{MinDiag, 2 * math.Sqrt(2) / 3},
-		{MaxDiag, 2 * math.Sqrt(2)},
-		{AvgDiag, 2.031817866418812674},
+		{AvgEdge, 1.459213746386106062},
+		{MinDiag, 8 * math.Sqrt(2) / 9},
+		{MaxDiag, 2.438654594434021032},
+		{AvgDiag, 2.060422738998471683},
 	}
 	for _, test := range tests {
 		got := test.metric.Deriv

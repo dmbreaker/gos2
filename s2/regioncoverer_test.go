@@ -78,6 +78,7 @@ func CheckCompleteCovering(t *testing.T, region Region, covering CellUnion, chec
 		// covering.
 		if check_tight {
 			if covering.IntersectsCellID(id) {
+				fmt.Printf("%v.IntersectsCellID(%v)\n", covering, id)
 				t.Errorf("%v.IntersectsCellID(%v)", covering, id)
 			}
 		}
@@ -93,8 +94,7 @@ func CheckCompleteCovering(t *testing.T, region Region, covering CellUnion, chec
 			t.Errorf("%d.IsLeaf()", id)
 		}
 		for ci := id.childBegin(); ci != id.childEnd(); ci = ci.next() {
-			// I need to figure out why this test infinite loops :\
-			//			CheckCompleteCovering(t, region, covering, check_tight, ci)
+			CheckCompleteCovering(t, region, covering, check_tight, ci)
 		}
 	}
 }
@@ -143,7 +143,7 @@ func CheckCovering(t *testing.T, coverer RegionCoverer, region Region, covering 
 func TestRandomCaps(t *testing.T) {
 	rand.Seed(4)
 	coverer := NewRegionCoverer()
-	for i := 0; i < 1000; i++ {
+	for i := 0; i < 50; i++ {
 		for {
 			coverer.SetMinLevel(rand.Intn(MaxCellLevel + 1))
 			coverer.SetMaxLevel(rand.Intn(MaxCellLevel + 1))

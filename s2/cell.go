@@ -35,10 +35,34 @@ func CellFromCellID(id CellID) Cell {
 	for d := 0; d < 2; d++ {
 		lo := ij[d] & -cellSize
 		hi := lo + cellSize
-		cell.uv[d][0] = stToUV((1.0 / float64(maxSize)) * float64(lo))
-		cell.uv[d][1] = stToUV((1.0 / float64(maxSize)) * float64(hi))
+		cell.uv[d][0] = stToUV((1.0 / maxSize) * float64(lo))
+		cell.uv[d][1] = stToUV((1.0 / maxSize) * float64(hi))
 	}
 	return cell
+}
+
+func (c Cell) IsLeaf() bool         { return c.level == maxLevel }
+func (c Cell) AverageArea() float64 { return AverageArea(int(c.level)) }
+
+func (c Cell) ApproxArea() float64 {
+	// All cells at the first two levels have the same area.
+	if c.level < 2 {
+		return c.AverageArea()
+	}
+	v0 := c.Vertex(0)
+	v1 := c.Vertex(1)
+	v2 := c.Vertex(2)
+	v3 := c.Vertex(3)
+	flatArea := 0.5 * v2.Sub(v0.Vector).Cross(v3.Sub(v1.Vector)).Norm()
+	return flatArea * 2 / (1 + math.Sqrt(1-math.Min(M_1_PI*flatArea, 1.0)))
+}
+
+func (c Cell) ExactArea() float64 {
+	v0 := c.Vertex(0)
+	v1 := c.Vertex(1)
+	v2 := c.Vertex(2)
+	v3 := c.Vertex(3)
+	return Area(v0, v1, v2) + Area(v0, v2, v3)
 }
 
 func (c Cell) CapBound() Cap {
@@ -60,31 +84,13 @@ func (c Cell) CapBound() Cap {
 }
 
 func (c Cell) Subdivide(children *[4]Cell) bool {
-	if c.id.IsLeaf() {
+	if c.IsLeaf() {
 		return false
 	}
 
-	// Compute the cell midpoint in uv-space.
-	u, v := c.id.centerUV()
-	// Create four children with the appropriate bounds.
-	id := c.id.childBegin()
-	for pos := 0; pos < 4; pos, id = pos+1, id.next() {
-		child := &children[pos]
-		child.face = c.face
-		child.level = c.level + 1
-		child.orientation = c.orientation ^ int8(posToOrientation[pos])
-		child.id = id
-		// We want to split the cell in half in "u" and "v". To decide
-		// which side to set equal to the midpoint value, we look at
-		// cell's (i,j) position within its parent. The index for "i"
-		// is in bit 1 of ij.
-		ij := posToIJ[c.orientation][pos]
-		i := ij >> 1
-		j := ij & 1
-		child.uv[0][i] = c.uv[0][i]
-		child.uv[0][1-i] = u
-		child.uv[1][j] = c.uv[1][j]
-		child.uv[1][1-j] = v
+	ci := c.id.childBegin()
+	for pos := 0; pos < 4; pos, ci = pos+1, ci.next() {
+		children[pos] = CellFromCellID(ci)
 	}
 	return true
 }
@@ -120,6 +126,10 @@ func (c Cell) EdgeRaw(k int) Point {
 	default:
 		return Point{uNorm(face, c.uv[0][0]).Neg()} // West
 	}
+}
+
+func (c Cell) Edge(k int) Point {
+	return Point{c.EdgeRaw(k).Normalize()}
 }
 
 func (c Cell) Vertex(k int) Point {

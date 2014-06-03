@@ -3,6 +3,7 @@ package s2
 import (
 	"code.google.com/p/gos2/r3"
 	"code.google.com/p/gos2/s1"
+	"math"
 )
 
 // Point represents a point on the unit sphere as a normalized 3D vector.
@@ -330,6 +331,32 @@ func TurnAngle(a, b, c Point) float64 {
 		return float64(angle)
 	}
 	return float64(-angle)
+}
+
+func Area(a, b, c Point) float64 {
+	sa := b.Distance(c).Radians()
+	sb := c.Distance(a).Radians()
+	sc := a.Distance(b).Radians()
+	s := 0.5 * (sa + sb + sc)
+	if s >= 3e-4 {
+		s2 := s * s
+		dmin := s - math.Max(sa, math.Max(sb, sc))
+		if dmin < 1e-2*s*s2*s2 {
+			area := GirardArea(a, b, c)
+			if dmin < s*(0.1*area) {
+				return area
+			}
+		}
+	}
+	return 4 * math.Atan(math.Sqrt(math.Max(0.0, math.Tan(0.5*s)*math.Tan(0.5*(s-sa))*
+		math.Tan(0.5*(s-sb))*math.Tan(0.5*(s-sc)))))
+}
+
+func GirardArea(a, b, c Point) float64 {
+	ab := a.PointCross(b)
+	bc := b.PointCross(c)
+	ac := a.PointCross(c)
+	return math.Max(0.0, ab.Distance(ac).Radians()-ab.Distance(bc).Radians()+bc.Distance(ac).Radians())
 }
 
 // TODO(dnadasi):

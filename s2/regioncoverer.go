@@ -142,14 +142,14 @@ func (r *RegionCoverer) AddCandidate(candidate *Candidate) {
 	// Expand one level at a time until we hit minLevel to ensure that we
 	// don't skip over it.
 	var numLevels int
-	if int(candidate.cell.level) < r.minLevel {
+	level := int(candidate.cell.level)
+	if level < r.minLevel {
 		numLevels = 1
 	} else {
 		numLevels = r.levelMod
 	}
 	numTerminals := r.ExpandChildren(candidate, candidate.cell, numLevels)
 	shift := uint(r.maxChildrenShift())
-	level := int(candidate.cell.level)
 	numChildren := len(candidate.children)
 
 	if numChildren == 0 {
@@ -173,6 +173,7 @@ func (r *RegionCoverer) AddCandidate(candidate *Candidate) {
 		// number of children that cannot be refined any further.
 		priority := -((((level << shift) + numChildren) << shift) + numTerminals)
 		heap.Push(r.pq, &CandidateEntry{candidate, priority})
+		//		fmt.Printf("Push: %v (%v)\n", candidate.cell.id, priority)
 	}
 }
 
@@ -185,7 +186,7 @@ func (r *RegionCoverer) InitialCandidates() {
 		// Find the maximum level such that the bounding cap contains
 		// at most one cell vertex at that level.
 		s2cap := (*r.region).CapBound()
-		level := min(MinWidth.MaxLevel(2*float64(s2cap.Radius())), min(r.maxLevel, MaxCellLevel-1))
+		level := min(MinWidth.MaxLevel(2*float64(s2cap.Radius())), min(r.maxLevel, maxLevel-1))
 		if r.levelMod > 1 && level > r.minLevel {
 			level -= (level - r.minLevel) % r.levelMod
 		}
