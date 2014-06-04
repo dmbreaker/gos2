@@ -324,10 +324,10 @@ func DoSubdivide(t *testing.T, cell Cell) {
 		// This run takes awhile at non-debug levels...
 		var level int8
 		var chance int
-		level = 5  // debug
-		chance = 5 // debug
-		//		level = 6  // non-debug
-		//		chance = 4 // non-debug
+		//		level = 5  // debug
+		//		chance = 5 // debug
+		level = 6  // non-debug
+		chance = 4 // non-debug
 		if forceSubdivide || cell.level < level || oneIn(chance) {
 			DoSubdivide(t, child)
 		}
