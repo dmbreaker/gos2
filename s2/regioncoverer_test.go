@@ -143,7 +143,7 @@ func CheckCovering(t *testing.T, coverer RegionCoverer, region Region, covering 
 func TestRandomCaps(t *testing.T) {
 	rand.Seed(4)
 	coverer := NewRegionCoverer()
-	for i := 0; i < 50; i++ {
+	for i := 0; i < 1000; i++ {
 		for {
 			coverer.SetMinLevel(rand.Intn(MaxCellLevel + 1))
 			coverer.SetMaxLevel(rand.Intn(MaxCellLevel + 1))
