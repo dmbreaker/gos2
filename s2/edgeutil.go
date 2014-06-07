@@ -5,13 +5,21 @@ import (
 	"math"
 )
 
+const (
+	WEDGE_EQUALS                = iota
+	WEDGE_PROPERLY_CONTAINS     // A is a strict supersect of B.
+	WEDGE_IS_PROPERLY_CONTAINED // A is a strict subset of B.
+	WEDGE_PROPERLY_OVERLAPS     // All of A intersect B, A-B and B-A are non-empty.
+	WEDGE_IS_DISJOINT           // A is disjoint from B.
+)
+
 func WedgeIntersects(a0, ab1, a2, b0, b2 Point) bool {
 	// For A not to intersect B (where each loop interior is defined to be
 	// its left side), the CCW edge order around ab1 must be a0 b2 b0 a2.
 	// note that it's important to write these conditions as negatives
 	// (!OrderedCCW(a,b,c,o) rather than OrderedCCW(c,b,a,o)) to get
 	// correct results when two vertices are the same.
-	return !OrderedCCW(a0, b2, b0, ab1) && OrderedCCW(b0, a2, a0, ab1)
+	return !(OrderedCCW(a0, b2, b0, ab1) && OrderedCCW(b0, a2, a0, ab1))
 }
 
 func WedgeContains(a0, ab1, a2, b0, b2 Point) bool {
@@ -19,6 +27,48 @@ func WedgeContains(a0, ab1, a2, b0, b2 Point) bool {
 	// left side), the CCW edge order around ab1 must be a2 b2 b0 a0. We
 	// split this test into two parts that test three vertices each.
 	return OrderedCCW(a2, b2, b0, ab1) && OrderedCCW(b0, a0, a2, ab1)
+}
+
+func GetWedgeRelation(a0, ab1, a2, b0, b2 Point) int {
+	// There are 6 possible edge orderings at a shared vertex (all
+	// of these orderings are circular, i.e. abcd = bcda):
+	//
+	// (1) a2 b2 b0 a0: A contains B
+	// (2) a2 a0 b0 b2: B contains A
+	// (3) a2 a0 b2 b0: A and B are disjoint
+	// (4) a2 b0 a0 b2: A and B intersect in one wedge
+	// (5) a2 b2 a0 b0: A and B intersect in one wedge
+	// (6) a2 b0 b2 a0: A and B intersect in two wedges
+	//
+	// We do not distinguish between 4, 5, and 6.
+	// We pay extra attention when some of the edges overlap. When edges
+	// overlap, several of these orderings can be satisfied, and we take
+	// the most specific.
+	if a0 == b0 && a2 == b2 {
+		return WEDGE_EQUALS
+	}
+
+	if OrderedCCW(a0, a2, b2, ab1) {
+		// The cases with this vertex ordering are 1, 5, and 6,
+		// although case 2 is also possible if a2 == b2.
+		if OrderedCCW(b2, b0, a0, ab1) {
+			return WEDGE_PROPERLY_CONTAINS
+		}
+		// We are in case 5 or 6, or case 2 if a2 == b2.
+		if a2 == b2 {
+			return WEDGE_IS_PROPERLY_CONTAINED
+		}
+		return WEDGE_PROPERLY_OVERLAPS
+	}
+
+	// We are in case 2, 3, or 4.
+	if OrderedCCW(a0, b0, b2, ab1) {
+		return WEDGE_IS_PROPERLY_CONTAINED
+	}
+	if OrderedCCW(a0, b0, a2, ab1) {
+		return WEDGE_IS_DISJOINT
+	}
+	return WEDGE_PROPERLY_OVERLAPS
 }
 
 // This is named GetDistance() in the C++ API.
@@ -35,15 +85,15 @@ func (x Point) DistanceToEdgeWithNormal(a, b, a_cross_b Point) s1.Angle {
 		// large distances (approaching Pi/2).
 		//
 		// TODO: sanity check a != b
-		sin_dist := math.Abs(x.Vector.Dot(a_cross_b.Vector)) / a_cross_b.Vector.Norm()
+		sin_dist := math.Abs(x.Dot(a_cross_b.Vector)) / a_cross_b.Norm()
 		return s1.Angle(s1.Angle(math.Asin(math.Min(1.0, sin_dist))).Radians())
 	}
 	// Otherwise, the closest point is either A or B. The cheapest method is
 	// just to compute the minimum of the two linear (as opposed to spherical)
 	// distances and convert the result to an angle. Again, this method is
 	// accurate for small but not large distances (approaching Pi).
-	xa := x.Vector.Sub(a.Vector).Norm2()
-	xb := x.Vector.Sub(b.Vector).Norm2()
+	xa := x.Sub(a.Vector).Norm2()
+	xb := x.Sub(b.Vector).Norm2()
 	linear_dist2 := math.Min(xa, xb)
 	return s1.Angle(2 * math.Asin(math.Min(1.0, 0.5*math.Sqrt(linear_dist2))))
 }
@@ -241,4 +291,25 @@ func (r *RectBounder) AddPoint(b *Point) {
 	}
 	r.a = b
 	r.latlng = ll
+}
+
+func EdgeInterpolate(t float64, a, b Point) Point {
+	if t == 0 {
+		return a
+	}
+	if t == 1 {
+		return b
+	}
+	ab := a.Angle(b.Vector)
+	return EdgeInterpolateAtDistance(s1.Angle(t)*ab, a, b, ab)
+}
+
+func EdgeInterpolateAtDistance(ax s1.Angle, a, b Point, ab s1.Angle) Point {
+	axRad := ax.Radians()
+	abRad := ab.Radians()
+	f := math.Sin(axRad) / math.Sin(abRad)
+	e := math.Cos(axRad) - f*math.Cos(abRad)
+	v0 := a.Mul(e)
+	v1 := b.Mul(f)
+	return Point{v0.Add(v1).Normalize()}
 }

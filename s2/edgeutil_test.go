@@ -27,6 +27,88 @@ func TestEquality(t *testing.T) {
 	}
 }
 
+func TestWedges(t *testing.T) {
+	tests := []struct {
+		a0            Point
+		ab1           Point
+		a2            Point
+		b0            Point
+		b2            Point
+		contains      bool
+		intersects    bool
+		wedgeRelation int
+	}{
+		// Intersection in one wedge.
+		{pc(-1, 0, 10), pc(0, 0, 1), pc(1, 2, 10),
+			pc(0, 1, 10), pc(1, -2, 10),
+			false, true, WEDGE_PROPERLY_OVERLAPS},
+
+		// Intersection in two wedges.
+		{pc(-1, -1, 10), pc(0, 0, 1), pc(1, -1, 10),
+			pc(1, 0, 10), pc(-1, 1, 10),
+			false, true, WEDGE_PROPERLY_OVERLAPS},
+
+		// Normal containment.
+		{pc(-1, -1, 10), pc(0, 0, 1), pc(1, -1, 10),
+			pc(-1, 0, 10), pc(1, 0, 10),
+			true, true, WEDGE_PROPERLY_CONTAINS},
+
+		// Containment with equality on one side.
+		{pc(2, 1, 10), pc(0, 0, 1), pc(-1, -1, 10),
+			pc(2, 1, 10), pc(1, -5, 10),
+			true, true, WEDGE_PROPERLY_CONTAINS},
+
+		// Containment with equality on the other side.
+		{pc(2, 1, 10), pc(0, 0, 1), pc(-1, -1, 10),
+			pc(1, -2, 10), pc(-1, -1, 10),
+			true, true, WEDGE_PROPERLY_CONTAINS},
+
+		// Containment with equality on both sides.
+		{pc(-2, 3, 10), pc(0, 0, 1), pc(4, -5, 10),
+			pc(-2, 3, 10), pc(4, -5, 10),
+			true, true, WEDGE_EQUALS},
+
+		// Disjoint with equality on one side.
+		{pc(-2, 3, 10), pc(0, 0, 1), pc(4, -5, 10),
+			pc(4, -5, 10), pc(-2, -3, 10),
+			false, false, WEDGE_IS_DISJOINT},
+
+		// Disjoint with equality on the other side.
+		{pc(-2, 3, 10), pc(0, 0, 1), pc(0, 5, 10),
+			pc(4, -5, 10), pc(-2, 3, 10),
+			false, false, WEDGE_IS_DISJOINT},
+
+		// Disjoint with equality on both sides.
+		{pc(-2, 3, 10), pc(0, 0, 1), pc(4, -5, 10),
+			pc(4, -5, 10), pc(-2, 3, 10),
+			false, false, WEDGE_IS_DISJOINT},
+
+		// B contains A with equality on one side.
+		{pc(2, 1, 10), pc(0, 0, 1), pc(1, -5, 10),
+			pc(2, 1, 10), pc(-1, -1, 10),
+			false, true, WEDGE_IS_PROPERLY_CONTAINED},
+
+		// B contains A with equality on the other side.
+		{pc(2, 1, 10), pc(0, 0, 1), pc(1, -5, 10),
+			pc(-2, 1, 10), pc(1, -5, 10),
+			false, true, WEDGE_IS_PROPERLY_CONTAINED},
+	}
+	for _, test := range tests {
+		got := WedgeContains(test.a0, test.ab1, test.a2, test.b0, test.b2)
+		if got != test.contains {
+			t.Errorf("WedgeContains(): got %v, want %v", got, test.contains)
+		}
+		got = WedgeIntersects(test.a0, test.ab1, test.a2, test.b0, test.b2)
+		if got != test.intersects {
+			t.Errorf("WedgeIntersects(): got %v, want %v", got, test.intersects)
+		}
+		relation := GetWedgeRelation(test.a0, test.ab1, test.a2, test.b0, test.b2)
+		if relation != test.wedgeRelation {
+			t.Errorf("GetWedgeRelation(): got %v, want %v", relation, test.wedgeRelation)
+		}
+	}
+}
+
 // Given a point X and an edge AB, check that the distance from X to AB is
 // "distance_radians" and the closest point on AB is "expected_closest"
 func TestDistanceToEdge(t *testing.T) {
