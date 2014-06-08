@@ -1,6 +1,7 @@
 package r3
 
 import (
+	"github.com/davidreynolds/exactfloat"
 	"math"
 	"testing"
 )
@@ -196,7 +197,7 @@ func TestMul(t *testing.T) {
 
 		vxf := Vector3_xf_FromVector(test.v)
 		wxf := Vector3_xf_FromVector(test.want)
-		mxf := NewExactFloat(test.m)
+		mxf := exactfloat.NewExactFloat(test.m)
 		if !vxf.Mul(mxf).ApproxEqual(wxf) {
 			t.Errorf("%v%v = %v, want %v", mxf, vxf, vxf.Mul(mxf), wxf)
 		}
