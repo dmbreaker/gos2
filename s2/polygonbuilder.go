@@ -2,7 +2,7 @@ package s2
 
 import (
 	"code.google.com/p/gos2/s1"
-	"math"
+	"log"
 	"sort"
 )
 
@@ -10,15 +10,20 @@ type Edge struct {
 	v0, v1 Point
 }
 
-type ByEdgeFirst []Edge
-
-func (a ByEdgeFirst) Len() int { return len(a) }
-func (a ByEdgeFirst) Swap(i, j int) {
-	a[i].v0, a[j].v0 = a[j].v0, a[i].v0
-	a[i].v1, a[j].v1 = a[j].v1, a[i].v1
-}
-func (a ByEdgeFirst) Less(i, j int) bool {
-	return a[i].v0.LessThan(a[j].v0.Vector)
+func (a Edge) LessThan(b Edge) bool {
+	if a.v0.LessThan(b.v0.Vector) {
+		return true
+	}
+	if b.v0.LessThan(a.v0.Vector) {
+		return false
+	}
+	if a.v1.LessThan(b.v1.Vector) {
+		return true
+	}
+	if b.v1.LessThan(a.v1.Vector) {
+		return false
+	}
+	return false
 }
 
 type PolygonBuilderOptions struct {
@@ -29,6 +34,11 @@ type PolygonBuilderOptions struct {
 	edge_splice_fraction float64
 }
 
+// These are the options that should be used for assembling well-behaved
+// input data into polygons. All edges should be directed such that
+// "shells" and "holes" have opposite orientations (typically CCW shells and
+// clockwise holes), unless it is known that shells and holes do not share
+// any edges.
 func DIRECTED_XOR() PolygonBuilderOptions {
 	return PolygonBuilderOptions{
 		xor_edges:            true,
@@ -39,8 +49,59 @@ func DIRECTED_XOR() PolygonBuilderOptions {
 	}
 }
 
+// These are the options that should be used for assembling polygons that do
+// not follow the conventions above, e.g. where edge directions may vary
+// within a single loop, or shells and holes are not oppositely oriented and
+// may share edges.
+func UNDIRECTED_XOR() PolygonBuilderOptions {
+	return PolygonBuilderOptions{
+		xor_edges:            true,
+		undirected_edges:     true,
+		validate:             false,
+		vertex_merge_radius:  0,
+		edge_splice_fraction: 0.866,
+	}
+}
+
+// These are the options that should be used for assembling edges where the
+// desired output is a collection of loops rather than a polygon, and edges
+// may occur more than once. Edges are treated as undirected and are not
+// XORed together.
+func UNDIRECTED_UNION() PolygonBuilderOptions {
+	return PolygonBuilderOptions{
+		xor_edges:            false,
+		undirected_edges:     true,
+		validate:             false,
+		vertex_merge_radius:  0,
+		edge_splice_fraction: 0.866,
+	}
+}
+
+type CellIDPoint struct {
+	id    CellID
+	point Point
+}
+
+type byIDPoint []CellIDPoint
+
+func (x byIDPoint) Len() int { return len(x) }
+func (x byIDPoint) Less(i, j int) bool {
+	if uint64(x[i].id) < uint64(x[j].id) {
+		return true
+	}
+	if uint64(x[j].id) < uint64(x[i].id) {
+		return false
+	}
+	if x[i].point.LessThan(x[j].point.Vector) {
+		return true
+	}
+	return false
+}
+
+func (x byIDPoint) Swap(i, j int) { x[i], x[j] = x[j], x[i] }
+
 type PointIndex struct {
-	map_          map[CellID][]Point
+	map_          []CellIDPoint
 	vertex_radius float64
 	edge_fraction float64
 	level         int
@@ -48,12 +109,13 @@ type PointIndex struct {
 
 func NewPointIndex(vertex_radius, edge_fraction float64) PointIndex {
 	max_level := MinWidth.MaxLevel(2 * vertex_radius)
-	return PointIndex{
-		map_:          map[CellID][]Point{Sentinel(): []Point{Point{}}},
+	idx := PointIndex{
 		vertex_radius: vertex_radius,
 		edge_fraction: edge_fraction,
-		level:         int(math.Min(float64(max_level), MaxCellLevel-1)),
+		level:         min(max_level, MaxCellLevel-1),
 	}
+	idx.map_ = []CellIDPoint{CellIDPoint{Sentinel(), Point{}}}
+	return idx
 }
 
 func (idx PointIndex) FindNearbyPoint(v0, v1 Point, out *Point) bool {
@@ -65,9 +127,9 @@ func (idx PointIndex) FindNearbyPoint(v0, v1 Point, out *Point) bool {
 	// as two spherical caps, one around each endpoint, and then computing a
 	// 4-cell covering using each one. We could improve the quality of the
 	// covering by using some intermediate points along the edge as well.
-	length := float64(v0.Distance(v1))
-	//	normal := v0.PointCross(v1)
-	level := int(math.Min(float64(idx.level), float64(MinWidth.MaxLevel(length))))
+	length := v0.Angle(v1.Vector).Radians()
+	normal := v0.PointCross(v1)
+	level := min(idx.level, MinWidth.MaxLevel(length))
 	ids := []CellID{}
 	cellIDFromPoint(v0).AppendVertexNeighbors(level, &ids)
 	cellIDFromPoint(v1).AppendVertexNeighbors(level, &ids)
@@ -75,91 +137,75 @@ func (idx PointIndex) FindNearbyPoint(v0, v1 Point, out *Point) bool {
 	// Sort the cell ids so that we can skip duplicates in the loop below.
 	sort.Sort(byID(ids))
 
-	// TODO: map_ won't work as is. You need to sort the mapped values
-	// before using them.
-
-	//	best_dist := 2 * idx.vertex_radius
+	bestDist := 2 * idx.vertex_radius
 	for i := len(ids) - 1; i >= 0; i-- {
 		// Skip duplicates
 		if i > 0 && ids[i-1] == ids[i] {
 			continue
 		}
-		//		max_id := ids[i].RangeMax()
-		for _, v := range idx.map_[ids[i]] {
-			if v == v0 || v == v1 {
+
+		maxId := ids[i].RangeMax()
+		j := sort.Search(len(idx.map_), func(k int) bool { return idx.map_[k].id >= ids[i].RangeMin() })
+		for ; idx.map_[j].id <= maxId; j++ {
+			p := idx.map_[j].point
+			if p == v0 || p == v1 {
 				continue
+			}
+			dist := p.DistanceToEdgeWithNormal(v0, v1, normal).Radians()
+			if dist < bestDist {
+				bestDist = dist
+				*out = p
 			}
 		}
 	}
-	return true
+	return bestDist < idx.edge_fraction*idx.vertex_radius
 }
 
 func (idx *PointIndex) Insert(p Point) {
 	ids := []CellID{}
 	cellIDFromPoint(p).AppendVertexNeighbors(idx.level, &ids)
 	for i := len(ids) - 1; i >= 0; i-- {
-		idx.map_[ids[i]] = append(idx.map_[ids[i]], p)
+		idx.map_ = append(idx.map_, CellIDPoint{ids[i], p})
 	}
+	sort.Sort(byIDPoint(idx.map_))
 }
 
 func (idx *PointIndex) Erase(p Point) {
 	ids := []CellID{}
 	cellIDFromPoint(p).AppendVertexNeighbors(idx.level, &ids)
 	for i := len(ids) - 1; i >= 0; i-- {
-		for k, v := range idx.map_[ids[i]] {
-			if v == p {
-				idx.map_[ids[i]] = append(idx.map_[ids[i]][:k], idx.map_[ids[i]][k+1:]...)
-				break
+		k := sort.Search(len(idx.map_), func(k int) bool { return idx.map_[k].id >= ids[i] })
+		j := k
+		for ; idx.map_[j].point != p; j++ {
+			if ids[i] != idx.map_[j].id {
+				log.Println("don't match:", ids[i], idx.map_[j])
 			}
 		}
+		idx.map_ = append(idx.map_[:k], idx.map_[j+1:]...)
 	}
 }
 
 func (idx PointIndex) QueryCap(axis Point) []Point {
 	out := []Point{}
 	id := cellIDFromPoint(axis).Parent(idx.level)
-	for _, v := range idx.map_[id] {
-		if float64(axis.Distance(v)) < idx.vertex_radius {
-			out = append(out, v)
+	i := sort.Search(len(idx.map_), func(k int) bool { return idx.map_[k].id >= id })
+	for ; idx.map_[i].id == id; i++ {
+		p := idx.map_[i].point
+		dist := axis.Angle(p.Vector).Radians()
+		if dist < idx.vertex_radius {
+			out = append(out, p)
 		}
 	}
 	return out
 }
 
-type VertexSet []Point
-type EdgeSet map[Point]*VertexSet
+type EdgeSet []Edge
 
-type ByVertexSet VertexSet
+type byEdgeSet EdgeSet
 
-func (a ByVertexSet) Len() int           { return len(a) }
-func (a ByVertexSet) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
-func (a ByVertexSet) Less(i, j int) bool { return a[i].LessThan(a[j].Vector) }
-
-func (vs VertexSet) Empty() bool {
-	return len(vs) == 0
-}
-
-func (vs *VertexSet) Insert(p Point) {
-	*vs = append(*vs, p)
-	sort.Sort(ByVertexSet(*vs))
-}
-
-func (vs *VertexSet) Erase(idx int) {
-	if idx >= 0 && idx < len(*vs) {
-		*vs = append((*vs)[:idx], (*vs)[idx+1:]...)
-	}
-}
-
-// Returns an index to the found point, or -1
-func (vs VertexSet) Find(p Point) int {
-	idx := sort.Search(len(vs), func(i int) bool {
-		return vs[i].GTE(p.Vector)
-	})
-	if idx < len(vs) && vs[idx] == p {
-		return idx
-	}
-	return -1
-}
+func (a byEdgeSet) Len() int           { return len(a) }
+func (a byEdgeSet) Swap(i, j int)      { a[i], a[j] = a[j], a[i] }
+func (a byEdgeSet) Less(i, j int) bool { return a[i].LessThan(a[j]) }
 
 type PolygonBuilder struct {
 	options             PolygonBuilderOptions
@@ -177,11 +223,10 @@ func NewPolygonBuilder(options PolygonBuilderOptions) PolygonBuilder {
 }
 
 func (b PolygonBuilder) HasEdge(v0, v1 Point) bool {
-	candidates, ok := b.edges[v0]
-	if ok {
-		if candidates.Find(v1) != -1 {
-			return true
-		}
+	edge := Edge{v0, v1}
+	idx := sort.Search(len(b.edges), func(i int) bool { return !b.edges[i].LessThan(edge) })
+	if idx < len(b.edges) && b.edges[idx].v0 == v0 && b.edges[idx].v1 == v1 {
+		return true
 	}
 	return false
 }
@@ -195,36 +240,41 @@ func (b *PolygonBuilder) AddEdge(v0, v1 Point) bool {
 		return false
 	}
 
-	if _, ok := b.edges[v0]; !ok {
-		b.edges[v0] = &VertexSet{}
+	idx := sort.Search(len(b.edges), func(i int) bool { return b.edges[i].v0.GTE(v0.Vector) })
+	if idx == len(b.edges) {
 		b.starting_vertices = append(b.starting_vertices, v0)
 	}
-	b.edges[v0].Insert(v1)
+	b.edges = append(b.edges, Edge{v0, v1})
 
 	if b.options.undirected_edges {
-		if _, ok := b.edges[v1]; !ok {
+		idx = sort.Search(len(b.edges), func(i int) bool { return b.edges[i].v0.GTE(v1.Vector) })
+		if idx == len(b.edges) {
 			b.starting_vertices = append(b.starting_vertices, v1)
 		}
-		b.edges[v1] = &VertexSet{}
-		b.edges[v1].Insert(v0)
+		b.edges = append(b.edges, Edge{v1, v0})
 	}
+
+	sort.Sort(byEdgeSet(b.edges))
 	return true
 }
 
 func (b *PolygonBuilder) EraseEdge(v0, v1 Point) {
 	// Note that there may be more than one copy of an edge if we are not
 	// XORing them, so a VertexSet is a multiset.
-	vset := b.edges[v0]
-	vset.Erase(vset.Find(v1))
-	if vset.Empty() {
-		delete(b.edges, v0)
+	idx := sort.Search(len(b.edges), func(i int) bool { return b.edges[i].v0.GTE(v0.Vector) })
+	i := idx
+	for i < len(b.edges) && b.edges[i].v0 == v0 {
+		i++
 	}
+	b.edges = append(b.edges[:idx], b.edges[i:]...)
+
 	if b.options.undirected_edges {
-		vset = b.edges[v1]
-		vset.Erase(vset.Find(v0))
-		if vset.Empty() {
-			delete(b.edges, v1)
+		idx := sort.Search(len(b.edges), func(i int) bool { return b.edges[i].v0.GTE(v1.Vector) })
+		i := idx
+		for i < len(b.edges) && b.edges[i].v0 == v1 {
+			i++
 		}
+		b.edges = append(b.edges[:idx], b.edges[i:]...)
 	}
 }
 
@@ -240,40 +290,39 @@ type MergeMap map[Point]Point
 // rather than computing the centroid of all the vertices to avoid creating new
 // vertex pairs that need to be merged. (We guarantee that all vertex pairs
 // are separated by at least the merge radius in the output.)
-func (b *PolygonBuilder) BuildMergeMap(index PointIndex) MergeMap {
+func (b *PolygonBuilder) BuildMergeMap(index *PointIndex) MergeMap {
 	// First, we build the set of all the distinct vertices in the input.
 	// We need to include the source and destination of every edge.
 	vertices := map[Point]bool{}
 	merge_map := MergeMap{}
 
-	for v0, v := range b.edges {
-		vertices[v0] = true
-		for _, v1 := range *v {
-			vertices[v1] = true
-		}
+	for _, edge := range b.edges {
+		vertices[edge.v0] = true
+		vertices[edge.v1] = true
 	}
 
-	// build a spatial index containing all the distinct vertices
+	// Build a spatial index containing all the distinct vertices
 	for p := range vertices {
 		index.Insert(p)
 	}
 
-	// next we loop through all the vertices and attempt to grow a maximal
+	// Next we loop through all the vertices and attempt to grow a maximal
 	// mergeable group starting from each vertex
 	frontier := []Point{}
 	for p := range vertices {
-		// skip any vertices that have already been merged with
+		// Skip any vertices that have already been merged with
 		// another vertex
 		if _, ok := merge_map[p]; ok {
 			continue
 		}
-		// grow a maximal mergeable component starting from "p", the
+
+		// Grow a maximal mergeable component starting from "p", the
 		// canonical representation of the mergeable group
 		frontier = append(frontier, p)
 		for len(frontier) > 0 {
 			i := len(frontier) - 1
 			mergeable := index.QueryCap(frontier[i])
-			frontier = append(frontier[:i], frontier[i+1:]...)
+			frontier = frontier[:i]
 			for j := len(mergeable) - 1; j >= 0; j-- {
 				v1 := mergeable[j]
 				if v1 != p {
@@ -295,14 +344,12 @@ func (b *PolygonBuilder) MoveVertices(merge_map MergeMap) {
 	}
 	edges := []Edge{}
 
-	for v0, vset := range b.edges {
-		for _, v1 := range *vset {
-			_, ok0 := merge_map[v0]
-			_, ok1 := merge_map[v1]
-			if ok0 || ok1 {
-				if !b.options.undirected_edges || v0.LessThan(v1.Vector) {
-					edges = append(edges, Edge{v0, v1})
-				}
+	for _, edge := range b.edges {
+		_, ok0 := merge_map[edge.v0]
+		_, ok1 := merge_map[edge.v1]
+		if ok0 || ok1 {
+			if !b.options.undirected_edges || edge.v0.LessThan(edge.v1.Vector) {
+				edges = append(edges, edge)
 			}
 		}
 	}
@@ -324,16 +371,14 @@ func (b *PolygonBuilder) MoveVertices(merge_map MergeMap) {
 	}
 }
 
-func (b *PolygonBuilder) SpliceEdges(index PointIndex) {
+func (b *PolygonBuilder) SpliceEdges(index *PointIndex) {
 	// We keep a stack of unprocessed edges. Initially all edges are
 	// pushed onto the stack.
 	edges := []Edge{}
 
-	for v0, vset := range b.edges {
-		for _, v1 := range *vset {
-			if !b.options.undirected_edges || v0.LessThan(v1.Vector) {
-				edges = append(edges, Edge{v0, v1})
-			}
+	for _, edge := range b.edges {
+		if !b.options.undirected_edges || edge.v0.LessThan(edge.v1.Vector) {
+			edges = append(edges, edge)
 		}
 	}
 
@@ -342,38 +387,37 @@ func (b *PolygonBuilder) SpliceEdges(index PointIndex) {
 	// split the edge into two pieces, and iterate on each piece.
 	for len(edges) > 0 {
 		i := len(edges) - 1
-		e := edges[i]
-		edges = append(edges[:i], edges[i+1:]...)
+		v0 := edges[i].v0
+		v1 := edges[i].v1
+		edges = edges[:i]
 
 		// If we are XORing, edges may be erased before we get to them.
-		if b.options.xor_edges && !b.HasEdge(e.v0, e.v1) {
+		if b.options.xor_edges && !b.HasEdge(v0, v1) {
 			continue
 		}
 
 		var vmid Point
-		if !index.FindNearbyPoint(e.v0, e.v1, &vmid) {
+		if !index.FindNearbyPoint(v0, v1, &vmid) {
 			continue
 		}
 
-		b.EraseEdge(e.v0, e.v1)
-		if b.AddEdge(e.v0, vmid) {
-			edges = append(edges, Edge{e.v0, vmid})
+		b.EraseEdge(v0, v1)
+		if b.AddEdge(v0, vmid) {
+			edges = append(edges, Edge{v0, vmid})
 		}
-		if b.AddEdge(vmid, e.v1) {
-			edges = append(edges, Edge{vmid, e.v1})
+		if b.AddEdge(vmid, v1) {
+			edges = append(edges, Edge{vmid, v1})
 		}
 	}
 }
 
 func (b *PolygonBuilder) AssembleLoops(loops *[]*Loop, unused_edges *[]Edge) bool {
 	if b.options.vertex_merge_radius.Radians() > 0 {
-		index := NewPointIndex(
-			b.options.vertex_merge_radius.Radians(),
-			b.options.edge_splice_fraction)
-		mergemap := b.BuildMergeMap(index)
+		index := NewPointIndex(b.options.vertex_merge_radius.Radians(), b.options.edge_splice_fraction)
+		mergemap := b.BuildMergeMap(&index)
 		b.MoveVertices(mergemap)
 		if b.options.edge_splice_fraction > 0 {
-			b.SpliceEdges(index)
+			b.SpliceEdges(&index)
 		}
 	}
 
@@ -381,6 +425,9 @@ func (b *PolygonBuilder) AssembleLoops(loops *[]*Loop, unused_edges *[]Edge) boo
 	if unused_edges == nil {
 		dummy_unused_edges = []Edge{}
 		unused_edges = &dummy_unused_edges
+	} else {
+		// Clear them out.
+		*unused_edges = []Edge{}
 	}
 
 	// We repeatedly choose an edge and attempt to assemble a loop
@@ -393,13 +440,13 @@ func (b *PolygonBuilder) AssembleLoops(loops *[]*Loop, unused_edges *[]Edge) boo
 
 	for i := 0; i < len(b.starting_vertices); {
 		v0 := b.starting_vertices[i]
-		candidates, ok := b.edges[v0]
-		if !ok {
+		idx := sort.Search(len(b.edges), func(k int) bool { return b.edges[k].v0.GTE(v0.Vector) })
+		if idx == len(b.edges) || b.edges[idx].v0 != v0 {
 			i++
 			continue
 		}
 
-		v1 := (*candidates)[0]
+		v1 := b.edges[idx].v1
 		loop = b.AssembleLoop(v0, v1, unused_edges)
 		if loop != nil {
 			*loops = append(*loops, loop)
@@ -425,31 +472,33 @@ func (b *PolygonBuilder) AssembleLoop(v0, v1 Point, unused_edges *[]Edge) *Loop 
 	index[v1] = 1
 
 	for len(path) >= 2 {
-		// Note that "v0" and "v1" become invalid if "path" is modified.
 		v0 = path[len(path)-2]
 		v1 = path[len(path)-1]
 		var v2 Point
 		v2_found := false
-		if vset, ok := b.edges[v1]; ok {
-			for _, v := range *vset {
-				// We prefer the leftmost outgoing edge,
-				// ignoring any reverse edges.
-				if v == v0 {
-					continue
-				}
-				if !v2_found || OrderedCCW(v0, v2, v, v1) {
-					v2 = v
-				}
-				v2_found = true
+
+		idx := sort.Search(len(b.edges), func(k int) bool {
+			return b.edges[k].v0.GTE(v1.Vector)
+		})
+
+		for i := idx; i < len(b.edges) && b.edges[i].v0 == v1; i++ {
+			// We prefer the leftmost outgoing edge,
+			// ignoring any reverse edges.
+			if b.edges[i].v1 == v0 {
+				continue
 			}
+			if !v2_found || OrderedCCW(v0, v2, b.edges[i].v1, v1) {
+				v2 = b.edges[i].v1
+			}
+			v2_found = true
 		}
+
 		if !v2_found {
 			// We've hit a dead end. Remove this edge and backtrack.
 			*unused_edges = append(*unused_edges, Edge{v0, v1})
 			b.EraseEdge(v0, v1)
 			delete(index, v1)
-			i := len(path) - 1
-			path = append(path[:i], path[i+1:]...)
+			path = path[:len(path)-1]
 		} else {
 			if _, ok := index[v2]; !ok {
 				// This is the first time we've visited this
@@ -470,4 +519,34 @@ func (b *PolygonBuilder) AssembleLoop(v0, v1 Point, unused_edges *[]Edge) *Loop 
 		}
 	}
 	return nil
+}
+
+func (b *PolygonBuilder) AssemblePolygon(polygon *Polygon, unusedEdges *[]Edge) bool {
+	var loops []*Loop
+	success := b.AssembleLoops(&loops, unusedEdges)
+	// If edges are undirected, then all loops are already CCW. Otherwise
+	// we need to make sure the loops are normalized.
+	if !b.options.undirected_edges {
+		for _, loop := range loops {
+			loop.Normalize()
+		}
+	}
+	if b.options.validate && !AreLoopsValid(loops) {
+		if unusedEdges != nil {
+			for _, loop := range loops {
+				b.RejectLoop(loop, unusedEdges)
+			}
+		}
+		return false
+	}
+	*polygon = PolygonFromLoops(&loops)
+	return success
+}
+
+func (b *PolygonBuilder) RejectLoop(loop *Loop, unusedEdges *[]Edge) {
+	n := len(loop.vertices)
+	for i, j := n-1, 0; j < n; i = j {
+		*unusedEdges = append(*unusedEdges, Edge{loop.vertices[i], loop.vertices[j]})
+		j++
+	}
 }

@@ -1,14 +1,12 @@
 package s2
 
 import (
+	"code.google.com/p/gos2/r3"
 	"math"
 	"testing"
 )
 
-// returns normalized point
-func pc(x, y, z float64) Point {
-	return PointFromCoords(x, y, z)
-}
+func pc(x, y, z float64) Point { return Point{r3.Vector{x, y, z}} }
 
 func TestEquality(t *testing.T) {
 	tests := []struct {
@@ -140,6 +138,11 @@ func TestDistanceToEdge(t *testing.T) {
 		{pc(-1, 0, 0), pc(1, 0, 0), pc(1, 0, 0), math.Pi, pc(1, 0, 0)},
 	}
 	for _, test := range tests {
+		test.x = Point{test.x.Normalize()}
+		test.a = Point{test.a.Normalize()}
+		test.b = Point{test.b.Normalize()}
+		test.expected_closest = Point{test.expected_closest.Normalize()}
+
 		got := test.x.DistanceToEdge(test.a, test.b).Radians()
 		if math.Abs(got-test.distance_radians) > 1e-14 {
 			t.Errorf("%v.DistanceToEdge(%v, %v) = %v, want %v",
@@ -147,14 +150,140 @@ func TestDistanceToEdge(t *testing.T) {
 		}
 
 		closest := test.x.ClosestPoint(test.a, test.b)
-		if test.expected_closest.ApproxEqual(pc(0, 0, 0)) {
-			if !closest.ApproxEqual(test.a) && !closest.ApproxEqual(test.b) {
-				t.Errorf("%v != %v || %v != %v", closest, test.a, closest, test.b)
+		if test.expected_closest == pc(0, 0, 0) {
+			if closest != test.a && closest != test.b {
+				t.Errorf("NOT: %v == %v || %v == %v", closest, test.a, closest, test.b)
 			}
 		} else {
 			if !closest.ApproxEqual(test.expected_closest) {
 				t.Errorf("%v != %v", closest, test.expected_closest)
 			}
+		}
+	}
+}
+
+const kDegen int = -2
+
+func testCrossing(t *testing.T, a, b, c, d Point, robust int, edgeOrVertex, simple bool) {
+	a = Point{a.Normalize()}
+	b = Point{b.Normalize()}
+	c = Point{c.Normalize()}
+	d = Point{d.Normalize()}
+	CompareResult(t, RobustCrossing(a, b, c, d), robust)
+	if simple {
+		ok1 := robust > 0
+		if ok1 != SimpleCrossing(a, b, c, d) {
+			t.Errorf("SimpleCrossing() != %v", ok1)
+		}
+	}
+	crosser := NewEdgeCrosser(&a, &b, &c)
+	CompareResult(t, crosser.RobustCrossing(&d), robust)
+	CompareResult(t, crosser.RobustCrossing(&c), robust)
+
+	if edgeOrVertex != EdgeOrVertexCrossing(a, b, c, d) {
+		t.Errorf("%v != EdgeOrVertexCrossing()", edgeOrVertex)
+	}
+	if edgeOrVertex != crosser.EdgeOrVertexCrossing(&d) {
+		t.Errorf("%v != crosser.EdgeOrVertexCrossing(&d)", edgeOrVertex)
+	}
+	if edgeOrVertex != crosser.EdgeOrVertexCrossing(&c) {
+		t.Errorf("%v != crosser.EdgeOrVertexCrossing(&c)", edgeOrVertex)
+	}
+}
+
+func TestCrossings(t *testing.T) {
+	tests := []struct {
+		a, b, c, d   Point
+		robust       int
+		edgeOrVertex bool
+		simple       bool
+	}{
+		// Two regular edges that cross.
+		{pc(1, 2, 1), pc(1, -3, 0.5),
+			pc(1, -0.5, -3), pc(0.1, 0.5, 3), 1, true, true},
+
+		// Two regular edges that cross antipodal points.
+		{pc(1, 2, 1), pc(1, -3, 0.5),
+			pc(-1, 0.5, 3), pc(-0.1, -0.5, -3), -1, false, true},
+
+		// Two edges on the same great circle.
+		{pc(0, 0, -1), pc(0, 1, 0),
+			pc(0, 1, 1), pc(0, 0, 1), -1, false, true},
+
+		// Two edges that cross where one vertex is OriginPoint().
+		{pc(1, 0, 0), OriginPoint(),
+			pc(1, -0.1, 1), pc(1, 1, -0.1), 1, true, true},
+
+		// Two edges that cross antipodal points where one vertex is S2::Origin().
+		{pc(1, 0, 0), pc(0, 1, 0),
+			pc(0, 0, -1), pc(-1, -1, 1), -1, false, true},
+
+		// Two edges that share an endpoint.  The Ortho() direction is (-4,0,2),
+		// and edge CD is further CCW around (2,3,4) than AB.
+		{pc(2, 3, 4), pc(-1, 2, 5),
+			pc(7, -2, 3), pc(2, 3, 4), 0, false, true},
+
+		// Two edges that barely cross each other near the middle of one edge.  The
+		// edge AB is approximately in the x=y plane, while CD is approximately
+		// perpendicular to it and ends exactly at the x=y plane.
+		{pc(1, 1, 1), pc(1, math.Nextafter(1, 0), -1),
+			pc(11, -12, -1), pc(10, 10, 1), 1, true, false},
+
+		// In this version, the edges are separated by a distance of about 1e-15.
+		{pc(1, 1, 1), pc(1, math.Nextafter(1, 2), -1),
+			pc(1, -1, 0), pc(1, 1, 0), -1, false, false},
+
+		// Two edges that barely cross each other near the end of both edges.  This
+		// example cannot be handled using regular double-precision arithmetic due
+		// to floating-point underflow.
+		{pc(0, 0, 1), pc(2, -1e-323, 1),
+			pc(1, -1, 1), pc(1e-323, 0, 1), 1, true, false},
+
+		// In this version, the edges are separated by a distance of about 1e-640.
+		{pc(0, 0, 1), pc(2, 1e-323, 1),
+			pc(1, -1, 1), pc(1e-323, 0, 1), -1, false, false},
+
+		// Two edges that barely cross each other near the middle of one edge.
+		// Computing the exact determinant of some of the triangles in this test
+		// requires more than 2000 bits of precision.
+		{pc(1, -1e-323, -1e-323), pc(1e-323, 1, 1e-323),
+			pc(1, -1, 1e-323), pc(1, 1, 0),
+			1, true, false},
+
+		// In this version, the edges are separated by a distance of about 1e-640.
+		{pc(1, 1e-323, -1e-323), pc(-1e-323, 1, 1e-323),
+			pc(1, -1, 1e-323), pc(1, 1, 0),
+			-1, false, false},
+	}
+	for _, test := range tests {
+		a, b, c, d := test.a, test.b, test.c, test.d
+		robust := test.robust
+		edgeOrVertex := test.edgeOrVertex
+		simple := test.simple
+
+		r := false
+		if robust == 0 {
+			r = true
+		}
+		testCrossing(t, a, b, c, d, robust, edgeOrVertex, simple)
+		testCrossing(t, b, a, c, d, robust, edgeOrVertex, simple)
+		testCrossing(t, a, b, d, c, robust, edgeOrVertex, simple)
+		testCrossing(t, b, a, d, c, robust, edgeOrVertex, simple)
+		testCrossing(t, a, a, c, d, kDegen, false, false)
+		testCrossing(t, a, b, c, c, kDegen, false, false)
+		testCrossing(t, a, b, a, b, 0, true, false)
+		testCrossing(t, c, d, a, b, robust, edgeOrVertex != r, simple)
+	}
+}
+
+func CompareResult(t *testing.T, actual, expected int) {
+	if expected == kDegen {
+		if actual > 0 {
+			t.Errorf("expected == kDegen: %d > 0", actual)
+		}
+	} else {
+		if expected != actual {
+			t.Errorf("expected = %v, actual = %v", expected, actual)
 		}
 	}
 }

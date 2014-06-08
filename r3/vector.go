@@ -37,31 +37,8 @@ func (v Vector) LessThan(ov Vector) bool {
 	return false
 }
 
-func (v Vector) GreaterThan(ov Vector) bool {
-	return ov.LessThan(v)
-}
-
-func (v Vector) GTE(ov Vector) bool {
-	if v.X >= ov.X {
-		return true
-	}
-	if ov.X >= v.X {
-		return false
-	}
-	if v.Y >= ov.Y {
-		return true
-	}
-	if ov.Y >= v.Y {
-		return false
-	}
-	if v.Z >= ov.Z {
-		return true
-	}
-	if ov.Z >= v.Z {
-		return false
-	}
-	return false
-}
+func (v Vector) GreaterThan(ov Vector) bool { return ov.LessThan(v) }
+func (v Vector) GTE(ov Vector) bool         { return !v.LessThan(ov) }
 
 func (v Vector) String() string { return fmt.Sprintf("(%v, %v, %v)", v.X, v.Y, v.Z) }
 

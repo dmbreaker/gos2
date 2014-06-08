@@ -53,7 +53,19 @@ func (c Cell) ApproxArea() float64 {
 	v1 := c.Vertex(1)
 	v2 := c.Vertex(2)
 	v3 := c.Vertex(3)
+
+	// First, compute the approximate area of the cell when projected
+	// perpendicular to its normal. The cross product of its diagonals
+	// gives the normal, and the length of the normal is twice the
+	// projected area.
 	flatArea := 0.5 * v2.Sub(v0.Vector).Cross(v3.Sub(v1.Vector)).Norm()
+
+	// Now, compensate for the curvature of the cell surface by pretending
+	// that the cell is shaped like a spherical cap. The ratio of the area
+	// of a spherical cap to the area of its projected disc turns out to be
+	// 2 / (1 + sqrt(1 - r*r)) where "r" is the radius of the disc. For
+	// example, when r=0 the ratio is 1, and when r=1 the ratio is 2.
+	// Here we set Pi*r*r == flatArea to find the equivalent disc.
 	return flatArea * 2 / (1 + math.Sqrt(1-math.Min(M_1_PI*flatArea, 1.0)))
 }
 

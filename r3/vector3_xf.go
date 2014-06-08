@@ -25,5 +25,12 @@ func (a Vector3_xf) CrossProd(b Vector3_xf) Vector3_xf {
 }
 
 func (a Vector3_xf) DotProd(b Vector3_xf) exactfloat.ExactFloat {
-	return a.X.Mul(b.X).Add(a.Y.Mul(b.Y)).Add(a.Z.Mul(b.Z))
+	x := a.X.Mul(b.X)
+	y := a.Y.Mul(b.Y)
+	z := a.Z.Mul(b.Z)
+	return x.Add(y).Add(z)
+}
+
+func (a Vector3_xf) Mul(m exactfloat.ExactFloat) Vector3_xf {
+	return Vector3_xf{a.X.Mul(m), a.Y.Mul(m), a.Z.Mul(m)}
 }

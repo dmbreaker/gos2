@@ -56,7 +56,7 @@ func GatherStats(cell Cell) {
 	minAngleSpan = 100
 
 	for i := 0; i < 4; i++ {
-		edge := float64(cell.VertexRaw(i).Distance(cell.VertexRaw((i + 1) & 3)))
+		edge := float64(cell.VertexRaw(i).Angle(cell.VertexRaw((i + 1) & 3).Vector))
 		minEdge = math.Min(edge, minEdge)
 		maxEdge = math.Max(edge, maxEdge)
 		avgEdge += 0.25 * edge
@@ -65,7 +65,7 @@ func GatherStats(cell Cell) {
 		minWidth = math.Min(width, minWidth)
 		maxWidth = math.Max(width, maxWidth)
 		if i < 2 {
-			diag := float64(cell.VertexRaw(i).Distance(cell.VertexRaw(i ^ 2)))
+			diag := float64(cell.VertexRaw(i).Angle(cell.VertexRaw(i ^ 2).Vector))
 			minDiag = math.Min(diag, minDiag)
 			maxDiag = math.Max(diag, maxDiag)
 			angleSpan := float64(cell.EdgeRaw(i).Angle(cell.EdgeRaw(i ^ 2).Neg()))
@@ -324,8 +324,8 @@ func DoSubdivide(t *testing.T, cell Cell) {
 		// This run takes awhile at non-debug levels...
 		var level int8
 		var chance int
-		//		level = 5  // debug
-		//		chance = 5 // debug
+		//level = 5 // debug
+		//chance = 5 // debug
 		level = 6  // non-debug
 		chance = 4 // non-debug
 		if forceSubdivide || cell.level < level || oneIn(chance) {

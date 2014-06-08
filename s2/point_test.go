@@ -2,6 +2,7 @@ package s2
 
 import (
 	"code.google.com/p/gos2/r3"
+	"log"
 	"math"
 	"testing"
 )
@@ -177,8 +178,8 @@ func TestColinearPoints(t *testing.T) {
 	// to be normalized, and in fact they both satisfy (x == x.Normalize()).
 	// Therefore the triangle (x1, x2, -x1) consists of three distinct
 	// points that all lie on a common line through the origin.
-	x1 := Point{r3.Vector{0.99999999999999989, 1.4901161193847655e-08, 0}}
-	x2 := Point{r3.Vector{1, 1.4901161193847656e-08, 0}}
+	x1 := pc(0.99999999999999989, 1.4901161193847655e-08, 0)
+	x2 := pc(1, 1.4901161193847656e-08, 0)
 	neg_x1 := Point{x1.Neg()}
 	if x1.Vector != x1.Normalize() {
 		t.Errorf("%v != %v", x1, x1.Normalize())
@@ -212,5 +213,98 @@ func TestColinearPoints(t *testing.T) {
 	}
 	if RobustCCW(x3, x4, neg_x3) == 0 {
 		t.Errorf("%v == %v", RobustCCW(x3, x4, neg_x3), 0)
+	}
+}
+
+func TestSymbolicPerturbation(t *testing.T) {
+	// The purpose of this test is simply to get code coverage of
+	// SymbolicallyPerturbedCCW(). Let M_1, M_2, ... be the sequence of
+	// submatrices whose determinant sign is tested by that function. Then
+	// the i-th test below is a 3x3 matrix M (with rows A, B, C) such that:
+	//
+	//  det(M)    = 0
+	//  det(M_j)  = 0 for j < i
+	//  det(M_i) != 0
+	//  A < B < C in lexicographic order.
+	tests := []struct {
+		p1x, p1y, p1z, p2x, p2y, p2z, p3x, p3y, p3z float64
+		want                                        int
+	}{
+		// All degenerate cases of CCW().  Let M_1, M_2, ... be the sequence of
+		// submatrices whose determinant sign is tested by that function.  Then the
+		// i-th test below is a 3x3 matrix M (with rows A, B, C) such that:
+		//
+		//    det(M) = 0
+		//    det(M_j) = 0 for j < i
+		//    det(M_i) != 0
+		//    A < B < C in lexicographic order.
+		// det(M_1) = b0*c1 - b1*c0
+		{-3, -1, 0, -2, 1, 0, 1, -2, 0, 1},
+		// det(M_2) = b2*c0 - b0*c2
+		{-6, 3, 3, -4, 2, -1, -2, 1, 4, 1},
+		// det(M_3) = b1*c2 - b2*c1
+		{0, -1, -1, 0, 1, -2, 0, 2, 1, 1},
+		// From this point onward, B or C must be zero, or B is proportional to C.
+		// det(M_4) = c0*a1 - c1*a0
+		{-1, 2, 7, 2, 1, -4, 4, 2, -8, 1},
+		// det(M_5) = c0
+		{-4, -2, 7, 2, 1, -4, 4, 2, -8, 1},
+		// det(M_6) = -c1
+		{0, -5, 7, 0, -4, 8, 0, -2, 4, 1},
+		// det(M_7) = c2*a0 - c0*a2
+		{-5, -2, 7, 0, 0, -2, 0, 0, -1, 1},
+		// det(M_8) = c2
+		{0, -2, 7, 0, 0, 1, 0, 0, 2, 1},
+
+		// From this point onward, C must be zero
+		// det(M_9) = a0*b1 - a1*b0
+		{-3, 1, 7, -1, -4, 1, 0, 0, 0, 1},
+		// det(M_10) = -b0
+		{-6, -4, 7, -3, -2, 1, 0, 0, 0, 1},
+		// det(M_11) = b1
+		{0, -4, 7, 0, -2, 1, 0, 0, 0, -1},
+		// det(M_12) = a0
+		{-1, -4, 5, 0, 0, -3, 0, 0, 0, -1},
+		// det(M_13) = 1
+		{0, -4, 5, 0, 0, -5, 0, 0, 0, 1},
+	}
+	for _, test := range tests {
+		a := Point{r3.Vector{test.p1x, test.p1y, test.p1z}}
+		b := Point{r3.Vector{test.p2x, test.p2y, test.p2z}}
+		c := Point{r3.Vector{test.p3x, test.p3y, test.p3z}}
+		checkSymbolicCCW(t, test.want, a, b, c)
+	}
+}
+
+func checkSymbolicCCW(t *testing.T, want int, a, b, c Point) {
+	if !a.LessThan(b.Vector) {
+		t.Errorf("%v >= %v", a, b)
+	}
+	if !b.LessThan(c.Vector) {
+		t.Errorf("%v >= %v", b, c)
+	}
+	if got := ExpensiveCCW(a, b, c); got != want {
+		log.Printf("ExpensiveCCW(%v, %v, %v) = %v, want %v", a, b, c, got, want)
+		t.Fatalf("ExpensiveCCW(%v, %v, %v) = %v, want %v", a, b, c, got, want)
+	}
+	if got := ExpensiveCCW(b, c, a); got != want {
+		log.Printf("ExpensiveCCW(%v, %v, %v) = %v, want %v", b, c, a, got, want)
+		t.Fatalf("ExpensiveCCW(%v, %v, %v) = %v, want %v", b, c, a, got, want)
+	}
+	if got := ExpensiveCCW(c, a, b); got != want {
+		log.Printf("ExpensiveCCW(%v, %v, %v) = %v, want %v", c, a, b, got, want)
+		t.Fatalf("ExpensiveCCW(%v, %v, %v) = %v, want %v", c, a, b, got, want)
+	}
+	if got := ExpensiveCCW(c, b, a); got != -want {
+		log.Printf("ExpensiveCCW(%v, %v, %v) = %v, want %v", c, b, a, got, -want)
+		t.Fatalf("ExpensiveCCW(%v, %v, %v) = %v, want %v", c, b, a, got, -want)
+	}
+	if got := ExpensiveCCW(b, a, c); got != -want {
+		log.Printf("ExpensiveCCW(%v, %v, %v) = %v, want %v", b, a, c, got, -want)
+		t.Fatalf("ExpensiveCCW(%v, %v, %v) = %v, want %v", b, a, c, got, -want)
+	}
+	if got := ExpensiveCCW(a, c, b); got != -want {
+		log.Printf("ExpensiveCCW(%v, %v, %v) = %v, want %v", a, c, b, got, -want)
+		t.Fatalf("ExpensiveCCW(%v, %v, %v) = %v, want %v", a, c, b, got, -want)
 	}
 }

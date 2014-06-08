@@ -2,6 +2,7 @@ package s2
 
 import (
 	"code.google.com/p/gos2/s1"
+	"log"
 	"math"
 )
 
@@ -188,15 +189,51 @@ func (e *EdgeCrosser) RobustCrossing(d *Point) int {
 	return result
 }
 
+func SimpleCrossing(a, b, c, d Point) bool {
+	// We compute SimpleCCW for triangles ACB, CBD, BDA, and DAC. All
+	// of these triangles need to have the same orientation (CW or CCW)
+	// for an intersection to exist. Note that this is slightly more
+	// restrictive than the corresponding definition for planar edges,
+	// since we need to exclude pairs of line segments that would
+	// otherwise "intersect" by crossing two antipodal points.
+	ab := a.Cross(b.Vector)
+	acb := -ab.Dot(c.Vector)
+	bda := ab.Dot(d.Vector)
+	if acb*bda <= 0 {
+		return false
+	}
+
+	cd := c.Cross(d.Vector)
+	cbd := -cd.Dot(b.Vector)
+	dac := cd.Dot(a.Vector)
+	return (acb*cbd > 0) && (acb*dac > 0)
+}
+
+func RobustCrossing(a, b, c, d Point) int {
+	crosser := NewEdgeCrosser(&a, &b, &c)
+	return crosser.RobustCrossing(&d)
+}
+
+func EdgeOrVertexCrossing(a, b, c, d Point) bool {
+	crossing := RobustCrossing(a, b, c, d)
+	if crossing < 0 {
+		return false
+	}
+	if crossing > 0 {
+		return true
+	}
+	return VertexCrossing(a, b, c, d)
+}
+
 func (e *EdgeCrosser) RobustCrossingInternal(d *Point) int {
 	// ACB and BDA have the appropriate orientations, so now we check the
 	// triangles CBD and DAC.
-	c_cross_d := e.c.Cross(d.Vector)
-	cbd := -RobustCCW2(*e.c, *d, *e.b, Point{c_cross_d})
+	c_cross_d := Point{e.c.Cross(d.Vector)}
+	cbd := -RobustCCW2(*e.c, *d, *e.b, c_cross_d)
 	if cbd != e.acb {
 		return -1
 	}
-	dac := RobustCCW2(*e.c, *d, *e.a, Point{c_cross_d})
+	dac := RobustCCW2(*e.c, *d, *e.a, c_cross_d)
 	if dac == e.acb {
 		return 1
 	}
@@ -226,6 +263,7 @@ func VertexCrossing(a, b, c, d Point) bool {
 	if b == d {
 		return OrderedCCW(Point{b.Ortho()}, c, a, b)
 	}
+	log.Fatal("VertexCrossing called with 4 distinct vertices")
 	return false
 }
 

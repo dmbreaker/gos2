@@ -193,6 +193,13 @@ func TestMul(t *testing.T) {
 		if !test.v.Mul(test.m).ApproxEqual(test.want) {
 			t.Errorf("%v%v = %v, want %v", test.m, test.v, test.v.Mul(test.m), test.want)
 		}
+
+		vxf := Vector3_xf_FromVector(test.v)
+		wxf := Vector3_xf_FromVector(test.want)
+		mxf := NewExactFloat(test.m)
+		if !vxf.Mul(mxf).ApproxEqual(wxf) {
+			t.Errorf("%v%v = %v, want %v", mxf, vxf, vxf.Mul(mxf), wxf)
+		}
 	}
 }
 

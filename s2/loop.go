@@ -425,6 +425,14 @@ func NewLoopFromCell(cell Cell) *Loop {
 	return loop
 }
 
+func (l Loop) IsHole() bool { return (l.depth & 1) != 0 }
+func (l Loop) Sign() int {
+	if l.IsHole() {
+		return -1
+	}
+	return 1
+}
+
 func (l *Loop) Clone() *Loop {
 	loop := &Loop{
 		vertices:      make([]Point, len(l.vertices)),
@@ -570,6 +578,12 @@ func (l Loop) IsNormalized() bool {
 	return l.TurningAngle() >= -1e-14
 }
 
+func (l *Loop) Normalize() {
+	if !l.IsNormalized() {
+		l.Invert()
+	}
+}
+
 // Return (first, dir) such that first..first+n*dir are valid indices.
 func (l Loop) CanonicalFirstVertex() (first, dir int) {
 	first = 0
@@ -665,6 +679,24 @@ func (a Loop) ContainsLoop(b *Loop) bool {
 	return true
 }
 
+func (a Loop) ContainsNested(b *Loop) bool {
+	if !a.bound.ContainsRect(b.bound) {
+		return false
+	}
+	// We are given that A and B do not share any edges, and that either
+	// one loop contains the other or they do not intersect.
+	m := a.FindVertex(*b.vertex(1))
+	if m < 0 {
+		// Since b.vertex(1) is not shared, we can check whether A
+		// contains it.
+		return a.Contains(*b.vertex(1))
+	}
+	// Check whether the edge order around b.vertex(1) is compatible with
+	// A containing B.
+	return WedgeContains(*a.vertex(m - 1), *a.vertex(m), *a.vertex(m + 1),
+		*b.vertex(0), *b.vertex(2))
+}
+
 func (l Loop) Contains(p Point) bool {
 	if !l.bound.Contains(LatLngFromPoint(p)) {
 		return false
@@ -726,6 +758,48 @@ type ContainsWedgeProcessor struct {
 func (p *ContainsWedgeProcessor) ProcessWedge(a0, ab1, a2, b0, b2 Point) bool {
 	p.doesnt_contain = !WedgeContains(a0, ab1, a2, b0, b2)
 	return p.doesnt_contain
+}
+
+// WedgeProcessor to be used to check if the interior of loop A contains the
+// interior of loop B, or their boundaries cross each other (therefore they
+// have a proper intersection). CrossesOrMayContain() then returns -1 if A
+// crossed B, 0 if it is not possible for A to contain B, and 1 otherwise.
+type ContainsOrCrossesProcessor struct {
+	// True if any crossing on the boundary is discovered.
+	has_boundary_crossing bool
+	// True if A (B) has a strictly superwedge on a pair of wedges that
+	// share a common center point.
+	a_has_strictly_super_wedge bool
+	b_has_strictly_super_wedge bool
+	// True if there is a pair of disjoint wedges with a common center
+	// point.
+	has_disjoint_wedge bool
+}
+
+func (p *ContainsOrCrossesProcessor) CrossesOrMayContain() int {
+	if p.has_boundary_crossing {
+		return -1
+	}
+	if p.has_disjoint_wedge || p.b_has_strictly_super_wedge {
+		return 0
+	}
+	return 1
+}
+
+func (p *ContainsOrCrossesProcessor) ProcessWedge(a0, ab1, a2, b0, b2 Point) bool {
+	wedgeRelation := GetWedgeRelation(a0, ab1, a2, b0, b2)
+	if wedgeRelation == WEDGE_PROPERLY_OVERLAPS {
+		p.has_boundary_crossing = true
+		return true
+	}
+	p.a_has_strictly_super_wedge = wedgeRelation == WEDGE_PROPERLY_CONTAINS
+	p.b_has_strictly_super_wedge = wedgeRelation == WEDGE_IS_PROPERLY_CONTAINED
+	if p.a_has_strictly_super_wedge && p.b_has_strictly_super_wedge {
+		p.has_boundary_crossing = true
+		return true
+	}
+	p.has_disjoint_wedge = wedgeRelation == WEDGE_IS_DISJOINT
+	return false
 }
 
 // This method checks all edges of this loop (A) for intersection against
@@ -808,6 +882,114 @@ func (a *Loop) Intersects(b *Loop) bool {
 	if b.bound.ContainsRect(a.bound) {
 		if b.Contains(*a.vertex(0)) && b.FindVertex(*a.vertex(0)) < 0 {
 			return true
+		}
+	}
+	return false
+}
+
+func (a *Loop) ContainsOrCrosses(b *Loop) int {
+	// There can be containment or crossing only if the bounds intersect.
+	if a.bound.Intersects(b.bound) {
+		return 0
+	}
+	// Now check whether there are any edge crossings, and also check
+	// the loop relationship at any shared vertices. Note that unlike
+	// Contains() or Intersects(), we can't do a point containment test
+	// as a shortcut because we need to detect whether there are any
+	// edge crossings.
+	var wedgeProcessor ContainsOrCrossesProcessor
+	if a.AreBoundariesCrossing(b, &wedgeProcessor) {
+		return -1
+	}
+	res := wedgeProcessor.CrossesOrMayContain()
+	if res <= 0 {
+		return res
+	}
+
+	// At this point we know that the boundaries do not intersect, and we
+	// are given that (A union B) is a proper subset of the sphere.
+	// Furthermore, either A contains B or there are no shared vertices
+	// (due to the check above). So now we just need to distinguish the
+	// case where A contains B from the case where B contains A or the
+	// two loops are disjoint.
+	if !a.bound.ContainsRect(b.bound) {
+		return 0
+	}
+	if !a.Contains(*b.vertex(0)) && a.FindVertex(*b.vertex(0)) < 0 {
+		return 0
+	}
+	return 1
+}
+
+func (a *Loop) BoundaryApproxEquals(b *Loop, maxError float64) bool {
+	numVerts := len(a.vertices)
+	if numVerts != len(b.vertices) {
+		return false
+	}
+	for offset := 0; offset < numVerts; offset++ {
+		if a.vertex(offset).ApproxEqualWithin(*b.vertex(0), maxError) {
+			success := true
+			for i := 0; i < numVerts; i++ {
+				if !a.vertex(i+offset).ApproxEqualWithin(*b.vertex(i), maxError) {
+					success = false
+					break
+				}
+			}
+			if success {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+func (a *Loop) BoundaryNear(b *Loop, maxError float64) bool {
+	for offset := 0; offset < len(a.vertices); offset++ {
+		if MatchBoundaries(a, b, offset, maxError) {
+			return true
+		}
+	}
+	return false
+}
+
+func MatchBoundaries(a, b *Loop, offset int, maxError float64) bool {
+	pending := []IntPair{}
+	done := map[IntPair]bool{}
+	pending = append(pending, IntPair{0, 0})
+	alen := len(a.vertices)
+	blen := len(b.vertices)
+	for len(pending) > 0 {
+		back := len(pending) - 1
+		i := pending[back].first
+		j := pending[back].second
+		pending = pending[:back]
+		if i == alen && j == blen {
+			return true
+		}
+		done[IntPair{i, j}] = true
+
+		io := i + offset
+		if io >= alen {
+			io -= alen
+		}
+
+		if i < alen {
+			if _, ok := done[IntPair{i + 1, j}]; !ok {
+				if a.vertex(io+1).DistanceToEdge(
+					*b.vertex(j),
+					*b.vertex(j + 1)).Radians() <= maxError {
+					pending = append(pending, IntPair{i + 1, j})
+				}
+			}
+		}
+		if j < blen {
+			if _, ok := done[IntPair{i, j + 1}]; !ok {
+				if b.vertex(j+1).DistanceToEdge(
+					*a.vertex(io),
+					*a.vertex(io + 1)).Radians() <= maxError {
+					pending = append(pending, IntPair{i, j + 1})
+				}
+			}
 		}
 	}
 	return false

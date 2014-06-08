@@ -180,45 +180,54 @@ func SymbolicallyPerturbedCCW(a, b, c, b_cross_c r3.Vector3_xf) int {
 	// that some of the signs are different because the opposite cross
 	// product is used (e.g., B x C rather than C x B).
 
-	var det_sign int
-	if det_sign = b_cross_c.Z.Sgn(); det_sign != 0 { // da[2]
+	if det_sign := b_cross_c.Z.Sgn(); det_sign != 0 { // da[2]
 		return det_sign
 	}
-	if det_sign = b_cross_c.Y.Sgn(); det_sign != 0 { // da[1]
+	if det_sign := b_cross_c.Y.Sgn(); det_sign != 0 { // da[1]
 		return det_sign
 	}
-	if det_sign = b_cross_c.X.Sgn(); det_sign != 0 { // da[0]
+	if det_sign := b_cross_c.X.Sgn(); det_sign != 0 { // da[0]
 		return det_sign
 	}
 
-	if det_sign = (c.X.Mul(a.Y).Sub(c.Y.Mul(a.X))).Sgn(); det_sign != 0 { // db[2]
+	first := c.X.Mul(a.Y)
+	second := c.Y.Mul(a.X)
+
+	if det_sign := first.Sub(second).Sgn(); det_sign != 0 { // db[2]
 		return det_sign
 	}
-	if det_sign = c.X.Sgn(); det_sign != 0 { // db[2] * da[1]
+	if det_sign := c.X.Sgn(); det_sign != 0 { // db[2] * da[1]
 		return det_sign
 	}
-	if det_sign = -(c.Y.Sgn()); det_sign != 0 { // db[2] * da[0]
+	if det_sign := -(c.Y.Sgn()); det_sign != 0 { // db[2] * da[0]
 		return det_sign
 	}
-	if det_sign = (c.Z.Mul(a.X).Sub(c.X.Mul(a.Z))).Sgn(); det_sign != 0 { // db[1]
+
+	first = c.Z.Mul(a.X)
+	second = c.X.Mul(a.Z)
+
+	if det_sign := first.Sub(second).Sgn(); det_sign != 0 { // db[1]
 		return det_sign
 	}
-	if det_sign = c.Z.Sgn(); det_sign != 0 { // db[1] * da[0]
+	if det_sign := c.Z.Sgn(); det_sign != 0 { // db[1] * da[0]
 		return det_sign
 	}
 
 	// The previous tests guarantee that C == (0, 0, 0).
 
-	if det_sign = (a.X.Mul(b.Y).Sub(a.Y.Mul(b.X))).Sgn(); det_sign != 0 { // dc[2]
+	first = a.X.Mul(b.Y)
+	second = a.Y.Mul(b.X)
+
+	if det_sign := first.Sub(second).Sgn(); det_sign != 0 { // dc[2]
 		return det_sign
 	}
-	if det_sign = -(b.X.Sgn()); det_sign != 0 { // dc[2] * da[1]
+	if det_sign := -(b.X.Sgn()); det_sign != 0 { // dc[2] * da[1]
 		return det_sign
 	}
-	if det_sign = b.Y.Sgn(); det_sign != 0 { // dc[2] * da[0]
+	if det_sign := b.Y.Sgn(); det_sign != 0 { // dc[2] * da[0]
 		return det_sign
 	}
-	if det_sign = a.X.Sgn(); det_sign != 0 { // dc[2] * db[1]
+	if det_sign := a.X.Sgn(); det_sign != 0 { // dc[2] * db[1]
 		return det_sign
 	}
 	return 1 // dc[2] * db[1] * da[0]
@@ -226,7 +235,7 @@ func SymbolicallyPerturbedCCW(a, b, c, b_cross_c r3.Vector3_xf) int {
 
 func ExpensiveCCW(a, b, c Point) int {
 	// Return zero if and only if two points are the same. This ensures (1).
-	if a.Vector == b.Vector || b.Vector == c.Vector || c.Vector == a.Vector {
+	if a == b || b == c || c == a {
 		return 0
 	}
 
@@ -287,7 +296,7 @@ func RobustCCW2(a, b, c, a_cross_b Point) int {
 }
 
 func TriageCCW(a, b, c, a_cross_b Point) int {
-	det := a_cross_b.Vector.Dot(c.Vector)
+	det := a_cross_b.Dot(c.Vector)
 	if det > maxDetError {
 		return 1
 	}
@@ -325,6 +334,11 @@ func (p Point) ApproxEqual(other Point) bool {
 	return p.Vector.Angle(other.Vector) <= epsilon
 }
 
+// ApproxEqualWithin reports if the two points are similar enough to be equal.
+func (p Point) ApproxEqualWithin(other Point, maxError float64) bool {
+	return float64(p.Vector.Angle(other.Vector)) <= maxError
+}
+
 func TurnAngle(a, b, c Point) float64 {
 	angle := b.PointCross(a).Vector.Angle(c.PointCross(b).Vector)
 	if RobustCCW(a, b, c) > 0 {
@@ -357,6 +371,17 @@ func GirardArea(a, b, c Point) float64 {
 	bc := b.PointCross(c)
 	ac := a.PointCross(c)
 	return math.Max(0.0, ab.Distance(ac).Radians()-ab.Distance(bc).Radians()+bc.Distance(ac).Radians())
+}
+
+func FrameFromPoint(z Point) (m r3.Matrix) {
+	m.SetCol(2, z.Vector)
+	m.SetCol(1, z.Ortho())
+	m.SetCol(0, m.Col(1).Cross(z.Vector)) // Already unit-length.
+	return
+}
+
+func PointFromFrame(m r3.Matrix, q Point) Point {
+	return Point{m.MulVector(q.Vector)}
 }
 
 // TODO(dnadasi):

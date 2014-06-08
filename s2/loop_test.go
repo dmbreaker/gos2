@@ -9,17 +9,24 @@ import (
 	"testing"
 )
 
-func makeloop(s string) *Loop {
+func parsePoints(s string) (vertices []Point) {
+	if s == "" {
+		return []Point{}
+	}
 	points := strings.Split(s, ",")
-	path := []Point{}
 	for _, p := range points {
 		p = strings.Trim(p, " ")
 		degs := strings.Split(p, ":")
 		lat, _ := strconv.ParseFloat(degs[0], 64)
 		lng, _ := strconv.ParseFloat(degs[1], 64)
 		ll := LatLngFromDegrees(lat, lng)
-		path = append(path, PointFromLatLng(ll))
+		vertices = append(vertices, PointFromLatLng(ll))
 	}
+	return
+}
+
+func makeloop(s string) *Loop {
+	path := parsePoints(s)
 	return NewLoopFromPath(path)
 }
 
