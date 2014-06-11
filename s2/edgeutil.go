@@ -87,7 +87,7 @@ func (x Point) DistanceToEdgeWithNormal(a, b, a_cross_b Point) s1.Angle {
 		//
 		// TODO: sanity check a != b
 		sin_dist := math.Abs(x.Dot(a_cross_b.Vector)) / a_cross_b.Norm()
-		return s1.Angle(s1.Angle(math.Asin(math.Min(1.0, sin_dist))).Radians())
+		return s1.Angle(math.Asin(math.Min(1.0, sin_dist)))
 	}
 	// Otherwise, the closest point is either A or B. The cheapest method is
 	// just to compute the minimum of the two linear (as opposed to spherical)

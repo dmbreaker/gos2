@@ -1,12 +1,16 @@
 package s2
 
 import (
-	"code.google.com/p/gos2/r1"
-	"code.google.com/p/gos2/s1"
+	"log"
 	"math"
+	"math/rand"
 	"strconv"
 	"strings"
 	"testing"
+
+	"code.google.com/p/gos2/r1"
+	"code.google.com/p/gos2/r3"
+	"code.google.com/p/gos2/s1"
 )
 
 func parsePoints(s string) (vertices []Point) {
@@ -15,14 +19,18 @@ func parsePoints(s string) (vertices []Point) {
 	}
 	points := strings.Split(s, ",")
 	for _, p := range points {
-		p = strings.Trim(p, " ")
-		degs := strings.Split(p, ":")
-		lat, _ := strconv.ParseFloat(degs[0], 64)
-		lng, _ := strconv.ParseFloat(degs[1], 64)
-		ll := LatLngFromDegrees(lat, lng)
-		vertices = append(vertices, PointFromLatLng(ll))
+		vertices = append(vertices, makepoint(p))
 	}
 	return
+}
+
+func makepoint(s string) Point {
+	s = strings.Trim(s, " ")
+	degs := strings.Split(s, ":")
+	lat, _ := strconv.ParseFloat(degs[0], 64)
+	lng, _ := strconv.ParseFloat(degs[1], 64)
+	ll := LatLngFromDegrees(lat, lng)
+	return PointFromLatLng(ll)
 }
 
 func makeloop(s string) *Loop {
@@ -161,4 +169,430 @@ func TestGetRectBound(t *testing.T) {
 	if !south_hemi.bound.Lat.Equal(i) {
 		t.Errorf("%v.Equal(%v) == false", south_hemi.bound.Lat, i)
 	}
+}
+
+func TestTurningAngle(t *testing.T) {
+	got := north_hemi3.TurningAngle()
+	if math.Abs(got) > 1e-15 {
+		t.Errorf("%v.TurningAngle() == %v, want near 0", north_hemi3, got)
+	}
+	checkTurningAngleInvariants(t, north_hemi3)
+	checkTurningAngleInvariants(t, candy_cane)
+
+	want := -2 * math.Pi
+	got = line_triangle.TurningAngle()
+	if math.Abs(got-want) > 1e-15 {
+		t.Errorf("%v.TurningAngle() = %v, want %v", line_triangle, got, want)
+	}
+	checkTurningAngleInvariants(t, line_triangle)
+
+	want = 2 * math.Pi
+	got = skinny_chevron.TurningAngle()
+	if math.Abs(got-want) > 1e-15 {
+		t.Errorf("%v.TurningAngle() = %v, want %v", skinny_chevron, got, want)
+	}
+	checkTurningAngleInvariants(t, skinny_chevron)
+}
+
+func TestContains(t *testing.T) {
+	if got := candy_cane.Contains(PointFromLatLng(LatLngFromDegrees(5, 71))); got != true {
+		t.Errorf("%v.Contains(%v) = %v, want %v", candy_cane,
+			PointFromLatLng(LatLngFromDegrees(5, 71)), got, true)
+	}
+	northCopy := north_hemi.Clone()
+	southCopy := south_hemi.Clone()
+	westCopy := west_hemi.Clone()
+	eastCopy := east_hemi.Clone()
+	tests := []struct {
+		loop    **Loop
+		x, y, z float64
+		want    bool
+	}{
+		{&northCopy, 0, 0, 1, true},
+		{&northCopy, 0, 0, -1, false},
+		{&southCopy, 0, 0, 1, false},
+		{&southCopy, 0, 0, -1, true},
+		{&westCopy, 0, 1, 0, false},
+		{&westCopy, 0, -1, 0, true},
+		{&eastCopy, 0, 1, 0, true},
+		{&eastCopy, 0, -1, 0, false},
+	}
+	for i := 0; i < 4; i++ {
+		for _, test := range tests {
+			p := Point{r3.Vector{test.x, test.y, test.z}}
+			if got := (*test.loop).Contains(p); got != test.want {
+				t.Errorf("%v.Contains(%v) = %v, want %v", *test.loop, p, got, test.want)
+			}
+		}
+		loopRotate(&northCopy)
+		loopRotate(&southCopy)
+		loopRotate(&westCopy)
+		loopRotate(&eastCopy)
+	}
+
+	for level := 0; level < 3; level++ {
+		loops := []*Loop{}
+		loopVertices := []Point{}
+		points := map[Point]bool{}
+		for id := CellIDBegin(level); id != CellIDEnd(level); id = id.next() {
+			cell := CellFromCellID(id)
+			points[cell.Center()] = true
+			for k := 0; k < 4; k++ {
+				loopVertices = append(loopVertices, cell.Vertex(k))
+				points[cell.Vertex(k)] = true
+			}
+			loops = append(loops, NewLoopFromPath(loopVertices))
+			loopVertices = []Point{}
+		}
+		for p := range points {
+			count := 0
+			for j := 0; j < len(loops); j++ {
+				if loops[j].Contains(p) {
+					count++
+				}
+			}
+			if count != 1 {
+				t.Errorf("%v should be 1", count)
+			}
+		}
+		for i, _ := range loops {
+			loops[i] = nil
+		}
+		loops = []*Loop{}
+	}
+}
+
+func checkTurningAngleInvariants(t *testing.T, loop *Loop) {
+	want := loop.TurningAngle()
+	loopCopy := loop.Clone()
+	for i := 0; i < len(loop.vertices); i++ {
+		loopCopy.Invert()
+		if got := loopCopy.TurningAngle(); got != -want {
+			t.Errorf("%v.TurningAngle() = %v, want %v", loopCopy, got, -want)
+		}
+		loopCopy.Invert()
+		loopRotate(&loopCopy)
+		if got := loopCopy.TurningAngle(); got != want {
+			t.Errorf("%v.TurningAngle() = %v, want %v", loopCopy, got, want)
+		}
+	}
+}
+
+func loopRotate(loop **Loop) {
+	vertices := make([]Point, 0, len((*loop).vertices))
+	for i := 1; i <= len((*loop).vertices); i++ {
+		vertices = append(vertices, *(*loop).vertex(i))
+	}
+	*loop = NewLoopFromPath(vertices)
+}
+
+func checkRelation(t *testing.T, a, b *Loop, containsOrCrosses int, intersects, nestable bool) {
+	if got := a.ContainsLoop(b); got != (containsOrCrosses == 1) {
+		t.Errorf("%v.ContainsLoop(%v) = %v, want %v", a, b, got, containsOrCrosses == 1)
+	}
+	if got := a.Intersects(b); got != intersects {
+		t.Errorf("%v.Intersects(%v) = %v, want %v", a, b, got, intersects)
+	}
+	if nestable {
+		if got := a.ContainsNested(b); got != a.ContainsLoop(b) {
+			t.Errorf("%v.ContainsNested(%v) = %v, want %v", a, b, got, a.ContainsLoop(b))
+		}
+	}
+	if containsOrCrosses >= -1 {
+		if got := a.ContainsOrCrosses(b); got != containsOrCrosses {
+			t.Errorf("%v.ContainsOrCrosses(%v) = %v, want %v", a, b, got, containsOrCrosses)
+		}
+	}
+}
+
+func TestLoopRelations(t *testing.T) {
+	tests := []struct {
+		a                 *Loop
+		b                 *Loop
+		containsOrCrosses int
+		intersects        bool
+		nestable          bool
+	}{
+
+		{north_hemi, north_hemi, 1, true, false},
+		{north_hemi, south_hemi, 0, false, false},
+		{north_hemi, east_hemi, -1, true, false},
+		{north_hemi, arctic_80, 1, true, true},
+		{north_hemi, antarctic_80, 0, false, true},
+		{north_hemi, candy_cane, -1, true, false},
+
+		// We can't compare north_hemi3 vs. north_hemi or south_hemi.
+		{north_hemi3, north_hemi3, 1, true, false},
+		{north_hemi3, east_hemi, -1, true, false},
+		{north_hemi3, arctic_80, 1, true, true},
+		{north_hemi3, antarctic_80, 0, false, true},
+		{north_hemi3, candy_cane, -1, true, false},
+
+		{south_hemi, north_hemi, 0, false, false},
+		{south_hemi, south_hemi, 1, true, false},
+		{south_hemi, far_hemi, -1, true, false},
+		{south_hemi, arctic_80, 0, false, true},
+		{south_hemi, antarctic_80, 1, true, true},
+		{south_hemi, candy_cane, -1, true, false},
+
+		{candy_cane, north_hemi, -1, true, false},
+		{candy_cane, south_hemi, -1, true, false},
+		{candy_cane, arctic_80, 0, false, true},
+		{candy_cane, antarctic_80, 0, false, true},
+		{candy_cane, candy_cane, 1, true, false},
+
+		{near_hemi, west_hemi, -1, true, false},
+
+		{small_ne_cw, south_hemi, 1, true, false},
+		{small_ne_cw, west_hemi, 1, true, false},
+		{small_ne_cw, north_hemi, -2, true, false},
+		{small_ne_cw, east_hemi, -2, true, false},
+
+		{loop_a, loop_a, 1, true, false},
+		{loop_a, loop_b, -1, true, false},
+		{loop_a, a_intersect_b, 1, true, false},
+		{loop_a, a_union_b, 0, true, false},
+		{loop_a, a_minus_b, 1, true, false},
+		{loop_a, b_minus_a, 0, false, false},
+
+		{loop_b, loop_a, -1, true, false},
+		{loop_b, loop_b, 1, true, false},
+		{loop_b, a_intersect_b, 1, true, false},
+		{loop_b, a_union_b, 0, true, false},
+		{loop_b, a_minus_b, 0, false, false},
+		{loop_b, b_minus_a, 1, true, false},
+
+		{a_intersect_b, loop_a, 0, true, false},
+		{a_intersect_b, loop_b, 0, true, false},
+		{a_intersect_b, a_intersect_b, 1, true, false},
+		{a_intersect_b, a_union_b, 0, true, true},
+		{a_intersect_b, a_minus_b, 0, false, false},
+		{a_intersect_b, b_minus_a, 0, false, false},
+
+		{a_union_b, loop_a, 1, true, false},
+		{a_union_b, loop_b, 1, true, false},
+		{a_union_b, a_intersect_b, 1, true, true},
+		{a_union_b, a_union_b, 1, true, false},
+		{a_union_b, a_minus_b, 1, true, false},
+		{a_union_b, b_minus_a, 1, true, false},
+
+		{a_minus_b, loop_a, 0, true, false},
+		{a_minus_b, loop_b, 0, false, false},
+		{a_minus_b, a_intersect_b, 0, false, false},
+		{a_minus_b, a_union_b, 0, true, false},
+		{a_minus_b, a_minus_b, 1, true, false},
+		{a_minus_b, b_minus_a, 0, false, true},
+
+		{b_minus_a, loop_a, 0, false, false},
+		{b_minus_a, loop_b, 0, true, false},
+		{b_minus_a, a_intersect_b, 0, false, false},
+		{b_minus_a, a_union_b, 0, true, false},
+		{b_minus_a, a_minus_b, 0, false, true},
+		{b_minus_a, b_minus_a, 1, true, false},
+
+		// Added in 2010/08: Make sure the relations are correct if the loop
+		// crossing happens on two ends of a shared boundary segment.
+		{loop_a, loop_c, -1, true, false},
+		{loop_c, loop_a, -1, true, false},
+		{loop_a, loop_d, 0, true, false},
+		{loop_d, loop_a, 1, true, false},
+	}
+	for _, test := range tests {
+		checkRelation(t, test.a, test.b, test.containsOrCrosses, test.intersects, test.nestable)
+	}
+}
+
+func TestLoopRelations2(t *testing.T) {
+	for iter := 0; iter < 1000; iter++ {
+		begin := CellID(rand.Int63() | 1)
+		if !begin.IsValid() {
+			continue
+		}
+		begin = begin.Parent(rand.Intn(maxLevel))
+		a_begin := begin.Advance(int64(skewed(6)))
+		a_end := a_begin.Advance(int64(skewed(6)) + 1)
+		b_begin := begin.Advance(int64(skewed(6)))
+		b_end := b_begin.Advance(int64(skewed(6)) + 1)
+		if !a_end.IsValid() || !b_end.IsValid() {
+			continue
+		}
+
+		a := makeCellLoop(a_begin, a_end)
+		b := makeCellLoop(b_begin, b_end)
+		if a != nil && b != nil {
+			contained := (a_begin <= b_begin && b_end <= a_end)
+			intersects := (a_begin < b_end && b_begin < a_end)
+			if got := a.ContainsLoop(b); got != contained {
+				t.Errorf("%v.ContainsLoop(%v) = %v, want %v", a, b, got, contained)
+			}
+			if got := a.Intersects(b); got != intersects {
+				t.Errorf("%v.Intersects(%v) = %v, want %v", a, b, got, intersects)
+			}
+		} else {
+			log.Println("failed to create loop")
+		}
+	}
+}
+
+func makeCellLoop(begin, end CellID) *Loop {
+	edges := map[Point]map[Point]bool{}
+	for id := begin; id != end; id = id.next() {
+		cell := CellFromCellID(id)
+		for k := 0; k < 4; k++ {
+			a := cell.Vertex(k)
+			b := cell.Vertex((k + 1) & 3)
+			if _, ok := edges[b][a]; !ok {
+				if _, ok := edges[a]; !ok {
+					edges[a] = map[Point]bool{}
+				}
+				edges[a][b] = true
+			}
+			delete(edges[b], a)
+			if len(edges[b]) == 0 {
+				delete(edges, b)
+			}
+		}
+	}
+	vertices := []Point{}
+	var p Point
+	for p, _ = range edges {
+		break
+	}
+
+	for len(edges) > 0 {
+		if len(edges[p]) != 1 {
+			log.Println(edges[p])
+		}
+		var next Point
+		for next, _ = range edges[p] {
+			break
+		}
+		vertices = append(vertices, p)
+		delete(edges, p)
+		p = next
+	}
+	return NewLoopFromPath(vertices)
+}
+
+func TestBoundaryNear(t *testing.T) {
+	degree := s1.Degree.Radians()
+	tests := []struct {
+		astr     string
+		bstr     string
+		maxError float64
+		want     bool
+	}{
+		{"0:0, 0:10, 5:5", "0:0.1, -0.1:9.9, 5:5.2", 0.5 * degree, true},
+		{"0:0, 0:3, 0:7, 0:10, 3:7, 5:5", "0:0, 0:10, 2:8, 5:5, 4:4, 3:3, 1:1", 1e-3, true},
+		{"0:0, 0:2, 2:2, 2:0", "0:0, 1.9999:1, 0:2, 2:2, 2:0", 0.5 * degree, false},
+		{"0.1:0, 0.1:1, 0.1:2, 0.1:3, 0.1:4, 1:4, 2:4, 3:4, 2:4.1, 1:4.1, 2:4.2, 3:4.2, 4:4.2, 5:4.2",
+			"0:0, 0:1, 0:2, 0:3, 0.1:2, 0.1:1, 0.2:2, 0.2:3, 0.2:4, 1:4.1, 2:4, 3:4, 4:4, 5:4",
+			1.5 * degree, true},
+		{"0.1:0, 0.1:1, 0.1:2, 0.1:3, 0.1:4, 1:4, 2:4, 3:4, 2:4.1, 1:4.1, 2:4.2, 3:4.2, 4:4.2, 5:4.2",
+			"0:0, 0:1, 0:2, 0:3, 0.1:2, 0.1:1, 0.2:2, 0.2:3, 0.2:4, 1:4.1, 2:4, 3:4, 4:4, 5:4",
+			0.5 * degree, false},
+	}
+	for _, test := range tests {
+		a := makeloop(test.astr)
+		b := makeloop(test.bstr)
+		if got := a.BoundaryNear(b, test.maxError); got != test.want {
+			t.Errorf("%v.BoundaryNear(%v, %v) = %v, want %v", a, b, test.maxError, got, test.want)
+		}
+		if got := b.BoundaryNear(a, test.maxError); got != test.want {
+			t.Errorf("%v.BoundaryNear(%v, %v) = %v, want %v", b, a, test.maxError, got, test.want)
+		}
+	}
+}
+
+func TestIsValidDetectsInvalidLoops(t *testing.T) {
+	tests := []struct {
+		str string
+	}{
+		// Only two vertices.
+		{"20:20, 21:21"},
+		// There is a duplicate vertex.
+		{"20:20, 21:21, 21:20, 20:20, 20:21"},
+		// Some edges intersect.
+		{"20:20, 21:21, 21:20.5, 21:20, 20:21"},
+	}
+	for _, test := range tests {
+		loop := makeloop(test.str)
+		if got := loop.IsValid(); got {
+			t.Errorf("%v.IsValid() = %v, want false", loop, got)
+		}
+	}
+}
+
+func TestNormalizedCompatibleWithContains(t *testing.T) {
+	checkNormalizeAndContains(t, line_triangle)
+	checkNormalizeAndContains(t, skinny_chevron)
+}
+
+func checkNormalizeAndContains(t *testing.T, loop *Loop) {
+	p := makepoint("40:40")
+	flip := loop.Clone()
+	flip.Invert()
+	if loop.IsNormalized() == loop.Contains(p) {
+		t.Errorf("%v.IsNormalized() == %v != %v.Contains(%v) == %v",
+			loop, loop.IsNormalized(), loop, p, loop.Contains(p))
+	}
+	if flip.IsNormalized() == flip.Contains(p) {
+		t.Errorf("%v.IsNormalized() == %v != %v.Contains(%v) == %v",
+			flip, flip.IsNormalized(), flip, p, flip.Contains(p))
+	}
+	if loop.IsNormalized() == flip.IsNormalized() {
+		t.Errorf("%v.IsNormalized() == %v.IsNormalized()", loop, flip)
+	}
+	flip.Normalize()
+	if flip.Contains(p) {
+		t.Errorf("%v.Contains(%v)", flip, p)
+	}
+}
+
+func TestQuadtreeGetsComputedAutomatically(t *testing.T) {
+	const numVerts = 200
+	loopCenter := makepoint("42:107")
+	loop := makeRegularLoop(loopCenter, numVerts, 7e-3)
+	q := makepoint("5:5")
+	index := NewLoopIndex(loop)
+	it := NewLoopIndexIterator(&index)
+	numCandidates := 0
+	it.GetCandidates(q, q)
+	for ; !it.Done(); it.Next() {
+		numCandidates++
+	}
+	if numVerts != numCandidates {
+		t.Errorf("numVerts (%v) != numCandidates (%v)", numVerts, numCandidates)
+	}
+
+	computed := false
+	for i := 0; i < 500; i++ {
+		numCandidates = 0
+		for it.GetCandidates(q, q); !it.Done(); it.Next() {
+			numCandidates++
+		}
+		if !computed && numCandidates == 0 {
+			computed = true
+		}
+	}
+	numCandidates = 0
+	for it.GetCandidates(q, q); !it.Done(); it.Next() {
+		numCandidates++
+	}
+	if 0 != numCandidates {
+		t.Errorf("numCandidates (%v) should be 0", numCandidates)
+	}
+}
+
+func makeRegularLoop(center Point, numVerts int, angleRadius float64) *Loop {
+	m := FrameFromPoint(center)
+	vertices := []Point{}
+	radianStep := 2 * math.Pi / float64(numVerts)
+	planarRadius := math.Tan(angleRadius)
+	for vi := 0; vi < numVerts; vi++ {
+		angle := float64(vi) * radianStep
+		p := PointFromCoords(planarRadius*math.Cos(angle), planarRadius*math.Sin(angle), 1)
+		vertices = append(vertices, PointFromFrame(m, p))
+	}
+	return NewLoopFromPath(vertices)
 }

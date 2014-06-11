@@ -25,6 +25,7 @@ const (
 	maxLevel     = 30
 	posBits      = 2*maxLevel + 1
 	maxSize      = 1 << maxLevel
+	wrapOffset   = numFaces << posBits
 	MaxCellLevel = maxLevel // export
 )
 
@@ -68,6 +69,25 @@ func CellIDFromToken(s string) CellID {
 
 func Sentinel() CellID {
 	return CellID(^uint64(0))
+}
+
+func (ci CellID) Advance(steps int64) CellID {
+	if steps == 0 {
+		return ci
+	}
+	stepShift := uint64(2*(maxLevel-ci.Level()) + 1)
+	if steps < 0 {
+		minSteps := -int64(uint64(ci) >> stepShift)
+		if steps < minSteps {
+			steps = minSteps
+		}
+	} else {
+		maxSteps := (wrapOffset + ci.lsb() - uint64(ci)) >> stepShift
+		if uint64(steps) > maxSteps {
+			steps = int64(maxSteps)
+		}
+	}
+	return CellID(uint64(ci) + (uint64(steps) << stepShift))
 }
 
 // ToToken returns a hex-encoded string of the uint64 cell id, with leading
@@ -170,6 +190,11 @@ func (ci CellID) immediateParent() CellID {
 	return (ci & -nlsb) | nlsb
 }
 
+func (ci CellID) Child(pos int) CellID {
+	lsb := ci.lsb() >> 2
+	return CellID(uint64(ci) + uint64(2*pos+1-4)*lsb)
+}
+
 // isFace returns whether this is a top-level (face) cell.
 func (ci CellID) isFace() bool { return uint64(ci)&(lsbForLevel(0)-1) == 0 }
 
@@ -240,6 +265,38 @@ func (ci CellID) AppendVertexNeighbors(level int, out *[]CellID) {
 	// vertex only has three neighors (it is on of the 8 cube vertices)
 	if isame || jsame {
 		*out = append(*out, cellIDFromFaceIJSame(face, i+ioff, j+joff, isame && jsame).Parent(level))
+	}
+}
+
+func (ci CellID) AppendAllNeighbors(nbrLevel int, out *[]CellID) {
+	face, i, j, _ := ci.faceIJOrientation()
+	size := sizeIJ(ci.Level())
+	i &= -size
+	j &= -size
+	nbrSize := sizeIJ(nbrLevel)
+
+	for k := -nbrSize; ; k += nbrSize {
+		var sameFace bool
+		if k < 0 {
+			sameFace = (j+k >= 0)
+		} else if k >= size {
+			sameFace = (j+k < maxSize)
+		} else {
+			sameFace = true
+			// North and South neighbors.
+			*out = append(*out, cellIDFromFaceIJSame(face, i+k, j-nbrSize,
+				j-size >= 0).Parent(nbrLevel))
+			*out = append(*out, cellIDFromFaceIJSame(face, i+k, j+size,
+				j+size < maxSize).Parent(nbrLevel))
+		}
+		// East, West, and Diagonal neighbors.
+		*out = append(*out, cellIDFromFaceIJSame(face, i-nbrSize, j+k,
+			sameFace && i-size >= 0).Parent(nbrLevel))
+		*out = append(*out, cellIDFromFaceIJSame(face, i+size, j+k,
+			sameFace && i+size < maxSize).Parent(nbrLevel))
+		if k >= size {
+			break
+		}
 	}
 }
 

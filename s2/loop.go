@@ -1,10 +1,11 @@
 package s2
 
 import (
-	"code.google.com/p/gos2/r1"
-	"code.google.com/p/gos2/s1"
 	"math"
 	"sort"
+
+	"code.google.com/p/gos2/r1"
+	"code.google.com/p/gos2/s1"
 )
 
 type CellEdge struct {
@@ -52,11 +53,11 @@ func (idx *LoopIndex) IncrementQueryCount() {
 }
 
 func (idx *LoopIndex) edge_from(i int) *Point {
-	return &idx.loop.vertices[i]
+	return idx.loop.vertex(i)
 }
 
 func (idx *LoopIndex) edge_to(i int) *Point {
-	return &idx.loop.vertices[i+1]
+	return idx.loop.vertex(i + 1)
 }
 
 func (idx *LoopIndex) num_edges() int {
@@ -425,6 +426,52 @@ func NewLoopFromCell(cell Cell) *Loop {
 	return loop
 }
 
+func (l Loop) IsValid() bool {
+	// Loops must have 3 vertices.
+	if len(l.vertices) < 3 {
+		return false
+	}
+	// All vertices must be unit length.
+	for _, v := range l.vertices {
+		if !v.IsUnit() {
+			return false
+		}
+	}
+	// Loops are not allowed to have any duplicate vertices.
+	vmap := map[Point]int{}
+	for i, v := range l.vertices {
+		if _, ok := vmap[v]; ok {
+			return false
+		}
+		vmap[v] = i
+	}
+	// Non-adjacent edges are not allowed to intersect.
+	crosses := false
+	l.index.PredictAdditionalCalls(len(l.vertices))
+	it := NewLoopIndexIterator(&l.index)
+	for i := 0; i < len(l.vertices); i++ {
+		crosser := NewEdgeCrosser(l.vertex(i), l.vertex(i+1), l.vertex(0))
+		prevIndex := -2
+		for it.GetCandidates(*l.vertex(i), *l.vertex(i + 1)); !it.Done(); it.Next() {
+			ai := it.Index()
+			if ai > i+1 {
+				if prevIndex != ai {
+					crosser.RestartAt(l.vertex(ai))
+				}
+				crosses = crosser.RobustCrossing(l.vertex(ai+1)) > 0
+				prevIndex = ai + 1
+				if crosses {
+					break
+				}
+			}
+		}
+		if crosses {
+			break
+		}
+	}
+	return !crosses
+}
+
 func (l Loop) IsHole() bool { return (l.depth & 1) != 0 }
 func (l Loop) Sign() int {
 	if l.IsHole() {
@@ -598,6 +645,7 @@ func (l Loop) CanonicalFirstVertex() (first, dir int) {
 		// 0 <= first <= n-1, so (first+n*dir) <= 2*n-1.
 	} else {
 		dir = -1
+		first += n
 		// n <= first <= 2*n-1, so (first+n*dir) >= 0.
 	}
 	return
@@ -792,13 +840,13 @@ func (p *ContainsOrCrossesProcessor) ProcessWedge(a0, ab1, a2, b0, b2 Point) boo
 		p.has_boundary_crossing = true
 		return true
 	}
-	p.a_has_strictly_super_wedge = wedgeRelation == WEDGE_PROPERLY_CONTAINS
-	p.b_has_strictly_super_wedge = wedgeRelation == WEDGE_IS_PROPERLY_CONTAINED
+	p.a_has_strictly_super_wedge = p.a_has_strictly_super_wedge || (wedgeRelation == WEDGE_PROPERLY_CONTAINS)
+	p.b_has_strictly_super_wedge = p.b_has_strictly_super_wedge || (wedgeRelation == WEDGE_IS_PROPERLY_CONTAINED)
 	if p.a_has_strictly_super_wedge && p.b_has_strictly_super_wedge {
 		p.has_boundary_crossing = true
 		return true
 	}
-	p.has_disjoint_wedge = wedgeRelation == WEDGE_IS_DISJOINT
+	p.has_disjoint_wedge = p.has_disjoint_wedge || (wedgeRelation == WEDGE_IS_DISJOINT)
 	return false
 }
 
@@ -838,7 +886,7 @@ func (a *Loop) AreBoundariesCrossing(b *Loop, wedge_processor WedgeProcessor) bo
 			// a.vertex(ai+1) == b.vertex(j+1).
 			if *a.vertex(ai + 1) == *b.vertex(j + 1) &&
 				wedge_processor.ProcessWedge(*a.vertex(ai), *a.vertex(ai + 1), *a.vertex(ai + 2),
-					*b.vertex(j), *b.vertex(j + 1)) {
+					*b.vertex(j), *b.vertex(j + 2)) {
 				return false
 			}
 		}
@@ -889,7 +937,7 @@ func (a *Loop) Intersects(b *Loop) bool {
 
 func (a *Loop) ContainsOrCrosses(b *Loop) int {
 	// There can be containment or crossing only if the bounds intersect.
-	if a.bound.Intersects(b.bound) {
+	if !a.bound.Intersects(b.bound) {
 		return 0
 	}
 	// Now check whether there are any edge crossings, and also check

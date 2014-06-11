@@ -23,8 +23,8 @@ func TestExistingDirectedEdge(t *testing.T) {
 	p1 := PointFromLatLng(LatLngFromDegrees(47, -122))
 	p2 := PointFromLatLng(LatLngFromDegrees(48, -122))
 	pb.AddEdge(p1, p2)
-	pb.AddEdge(p2, p1) // overwrite edge (p1, p2) with (p2, p1)
-	if pb.HasEdge(p1, p2) {
+	pb.AddEdge(p2, p1) // Old edge is removed and new one isn't added
+	if pb.HasEdge(p1, p2) || pb.HasEdge(p2, p1) {
 		t.Errorf("Undirected edge found in directed graph")
 	}
 }
@@ -60,7 +60,7 @@ func TestSingleLoop(t *testing.T) {
 	loops := []*Loop{}
 	edges := []Edge{}
 	if !pb.AssembleLoops(&loops, &edges) {
-		t.Errorf("unused edges")
+		t.Errorf("unused edges: %v (loops: %v)", edges, loops)
 	}
 
 	if len(loops) != 1 {
@@ -74,30 +74,83 @@ type Chain struct {
 }
 
 type TestCase struct {
-	undirectedEdges    int
-	xorEdges           int
-	canSplit           bool
-	minMerge, maxMerge float64
-	minVertexAngle     float64
-	chainsIn           []Chain
-	loopsOut           []string
-	numUnusedEdges     int
+	undirectedEdges    int      // +1 = undirected, -1 = directed, 0 = either
+	xorEdges           int      // +1 = XOR, -1 = don't XOR, 0 = either
+	canSplit           bool     // Can edges be split for this test case?
+	minMerge, maxMerge float64  // Min and max vertex merge radius for this test case in degrees.
+	minVertexAngle     float64  // Min angle in degrees between any two edges *after* vertex merging.
+	chainsIn           []Chain  // Each test case consists of a set of input loops and polylines.
+	loopsOut           []string // The expected set of output loops, directed appropriately.
+	numUnusedEdges     int      // The expected number of unused edges.
 }
 
 func TestAssembleLoops(t *testing.T) {
-	/*
-		tests := []TestCase{
-			{0, 0, true, 0.0, 10.0, 90.0, []Chain{Chain{"", false}}, []string{""}, 0},
+	rand.Seed(4)
+	tests := []TestCase{
+		// 0: No loops.
+		{0, 0, true, 0.0, 10.0, 90.0, []Chain{Chain{"", false}}, []string{""}, 0},
 
-			{0, 0, true, 0.0, 4.0, 15.0, []Chain{
+		// 1: One loop with some extra edges.
+		{0, 0, true, 0.0, 4.0, 15.0,
+			[]Chain{
 				Chain{"0:0, 0:10, 10:5", true},
 				Chain{"0:0, 5:5", false},
 				Chain{"10:5, 20:7, 30:10, 40:15, 50:3, 60:-20", false},
-			}, []string{
+			},
+			[]string{
 				"0:0, 0:10, 10:5",
 			}, 6},
 
-			{0, -1, true, 0.0, 4.0, 90.0, []Chain{
+		// 2: One loop that has an edge removed by XORing, plus lots of extra edges.
+		{0, 1, true, 0.0, 1.0, 45.0, // XOR
+			[]Chain{
+				Chain{"0:0, 0:10, 5:15, 10:10, 10:0", true},
+				Chain{"10:10, 12:12, 14:14, 16:16, 18:18", false},
+				Chain{"14:14, 14:16, 14:18, 14:20", false},
+				Chain{"14:18, 16:20, 18:22", false},
+				Chain{"18:12, 16:12, 14:12, 12:12", false},
+				Chain{"20:18, 18:16, 16:14, 14:12", false},
+				Chain{"20:14, 18:14, 16:14", false},
+				Chain{"5:15, 0:10", false},
+			}, []string{
+				"",
+			}, 21},
+
+		// 3: Three loops (two shells and one hole) that combine into one.
+		{0, 1, true, 0.0, 4.0, 90.0, // XOR
+			[]Chain{
+				Chain{"0:0, 0:10, 5:10, 10:10, 10:5, 10:0", true},
+				Chain{"0:10, 0:15, 5:15, 5:10", true},
+				Chain{"10:10, 5:10, 5:5, 10:5", true},
+			}, []string{
+				"0:0, 0:10, 0:15, 5:15, 5:10, 5:5, 10:5, 10:0",
+			}, 0},
+
+		// 4: A big CCW triangle contained 3 CW triangular holes. The
+		// whole thing looks like a pyramid of nine small triangles
+		// (with two extra edges).
+		{-1, 0, true, 0.0, 0.9, 30.0, // Directed edges required for unique result.
+			[]Chain{
+				Chain{"0:0, 0:2, 0:4, 0:6, 1:5, 2:4, 3:3, 2:2, 1:1", true},
+				Chain{"0:2, 1:1, 1:3", true},
+				Chain{"0:4, 1:3, 1:5", true},
+				Chain{"1:3, 2:2, 2:4", true},
+				Chain{"0:0, -1:1", false},
+				Chain{"3:3, 5:5", false},
+			}, []string{
+				"0:0, 0:2, 1:1",
+				"0:2, 0:4, 1:3",
+				"0:4, 0:6, 1:5",
+				"1:1, 1:3, 2:2",
+				"1:3, 1:5, 2:4",
+				"2:2, 2:4, 3:3",
+			}, 2},
+
+		// 5: A square divided into four subsquares. In this case we
+		// want to extract the four loops rather than taking their
+		// union.
+		{0, -1, true, 0.0, 4.0, 90.0,
+			[]Chain{
 				Chain{"0:0, 0:5, 5:5, 5:0", true},
 				Chain{"0:5, 0:10, 5:10, 5:5", true},
 				Chain{"5:0, 5:5, 10:5, 10:0", true},
@@ -110,23 +163,130 @@ func TestAssembleLoops(t *testing.T) {
 				"5:0, 5:5, 10:5, 10:0",
 				"5:5, 5:10, 10:10, 10:5",
 			}, 4},
+
+		// 6: Five nested loops that touch at a point.
+		{0, 0, true, 0.0, 0.8, 5.0,
+			[]Chain{
+				Chain{"0:0, 0:10, 10:10, 10:0", true},
+				Chain{"0:0, 1:9, 9:9, 9:1", true},
+				Chain{"0:0, 2:8, 8:8, 8:2", true},
+				Chain{"0:0, 3:7, 7:7, 7:3", true},
+				Chain{"0:0, 4:6, 6:6, 6:4", true},
+			}, []string{
+				"0:0, 0:10, 10:10, 10:0",
+				"0:0, 1:9, 9:9, 9:1",
+				"0:0, 2:8, 8:8, 8:2",
+				"0:0, 3:7, 7:7, 7:3",
+				"0:0, 4:6, 6:6, 6:4",
+			}, 0},
+
+		// 7: Four diamonds nested within each other touching at two points.
+		{-1, 0, true, 0.0, 4.0, 15.0, // Directed edges required for unique result.
+			[]Chain{
+				Chain{"0:-20, -10:0, 0:20, 10:0", true},
+				Chain{"0:10, -10:0, 0:-10, 10:0", true},
+				Chain{"0:-10, -5:0, 0:10, 5:0", true},
+				Chain{"0:5, -5:0, 0:-5, 5:0", true},
+			}, []string{
+				"0:-20, -10:0, 0:-10, 10:0",
+				"0:-10, -5:0, 0:-5, 5:0",
+				"0:5, -5:0, 0:10, 5:0",
+				"0:10, -10:0, 0:20, 10:0",
+			}, 0},
+
+		// 8: Seven diamonds nested within each other touching at one
+		// point between each nested pair.
+		{0, 0, true, 0.0, 9.0, 4.0,
+			[]Chain{
+				Chain{"0:-70, -70:0, 0:70, 70:0", true},
+				Chain{"0:-70, -60:0, 0:60, 60:0", true},
+				Chain{"0:-50, -60:0, 0:50, 50:0", true},
+				Chain{"0:-40, -40:0, 0:50, 40:0", true},
+				Chain{"0:-30, -30:0, 0:30, 40:0", true},
+				Chain{"0:-20, -20:0, 0:30, 20:0", true},
+				Chain{"0:-10, -20:0, 0:10, 10:0", true},
+			}, []string{
+				"0:-70, -70:0, 0:70, 70:0",
+				"0:-70, -60:0, 0:60, 60:0",
+				"0:-50, -60:0, 0:50, 50:0",
+				"0:-40, -40:0, 0:50, 40:0",
+				"0:-30, -30:0, 0:30, 40:0",
+				"0:-20, -20:0, 0:30, 20:0",
+				"0:-10, -20:0, 0:10, 10:0",
+			}, 0},
+
+		// 9: A triangle and a self-intersecting bowtie.
+		{0, 0, false, 0.0, 4.0, 45.0,
+			[]Chain{
+				Chain{"0:0, 0:10, 5:5", true},
+				Chain{"0:20, 0:30, 10:20", false},
+				Chain{"10:20, 10:30, 0:20", false},
+			}, []string{
+				"0:0, 0:10, 5:5",
+			}, 4},
+
+		// 10: Two triangles that intersect each other.
+		{0, 0, false, 0.0, 2.0, 45.0,
+			[]Chain{
+				Chain{"0:0, 0:12, 6:6", true},
+				Chain{"3:6, 3:18, 9:12", true},
+			}, []string{
+				"",
+			}, 6},
+
+		// 11: Four squares that combine to make a big square.  The nominal edges of
+		// the square are at +/-8.5 degrees in latitude and longitude.  All vertices
+		// except the center vertex are perturbed by up to 0.5 degrees in latitude
+		// and/or longitude.  The various copies of the center vertex are misaligned
+		// by more than this (i.e. they are structured as a tree where adjacent
+		// vertices are separated by at most 1 degree in latitude and/or longitude)
+		// so that the clustering algorithm needs more than one iteration to find
+		// them all.  Note that the merged position of this vertex doesn't matter
+		// because it is XORed away in the output.  However, it's important that
+		// all edge pairs that need to be XORed are separated by no more than
+		// 'min_merge' below.
+
+		{0, 1, true, 1.7, 5.8, 70.0, // XOR, min_merge > sqrt(2), max_merge < 6.
+			[]Chain{
+				Chain{"-8:-8, -8:0", false},
+				Chain{"-8:1, -8:8", false},
+				Chain{"0:-9, 1:-1", false},
+				Chain{"1:2, 1:9", false},
+				Chain{"0:8, 2:2", false},
+				Chain{"0:-2, 1:-8", false},
+				Chain{"8:9, 9:1", false},
+				Chain{"9:0, 8:-9", false},
+				Chain{"9:-9, 0:-8", false},
+				Chain{"1:-9, -9:-9", false},
+				Chain{"8:0, 1:0", false},
+				Chain{"-1:1, -8:0", false},
+				Chain{"-8:1, -2:0", false},
+				Chain{"0:1, 8:1", false},
+				Chain{"-9:8, 1:8", false},
+				Chain{"0:9, 8:8", false},
+			}, []string{
+				"8.5:8.5, 8.5:0.5, 8.5:-8.5, 0.5:-8.5, -8.5:-8.5, -8.5:0.5, -8.5:8.5, 0.5:8.5",
+			}, 0},
+	}
+	for i, test := range tests {
+		if !runTestCase(t, test) {
+			t.Errorf("#%d: runTestCase(t, %v) == false", i, test)
 		}
-		for _, test := range tests {
-			if !runTestCase(t, test) {
-				t.Errorf("TestBuilder(t, %v) == false", test)
-			}
-		}
-	*/
+	}
 }
 
 func runTestCase(t *testing.T, test TestCase) bool {
-	for iter := 0; iter < 1; iter++ {
-		options := PolygonBuilderOptions{edge_splice_fraction: .866}
+	for iter := 0; iter < 250; iter++ {
+		options := PolygonBuilderOptions{
+			edge_splice_fraction: .866,
+			validate:             false,
+			vertex_merge_radius:  s1.Angle(0),
+		}
 		options.undirected_edges = evalTristate(test.undirectedEdges)
 		options.xor_edges = evalTristate(test.xorEdges)
-		minMerge := s1.Angle(test.minMerge * (math.Pi / 180)).Radians()
-		maxMerge := s1.Angle(test.maxMerge * (math.Pi / 180)).Radians()
-		minSin := math.Sin(s1.Angle(test.minVertexAngle * (math.Pi / 180)).Radians())
+		minMerge := (s1.Angle(test.minMerge) * s1.Degree).Radians()
+		maxMerge := (s1.Angle(test.maxMerge) * s1.Degree).Radians()
+		minSin := math.Sin((s1.Angle(test.minVertexAngle) * s1.Degree).Radians())
 
 		// Half of the time we allow edges to be split into smaller
 		// pieces (up to 5 levels, i.e. up to 32 pieces).
@@ -163,7 +323,6 @@ func runTestCase(t *testing.T, test TestCase) bool {
 			if maxMerge < minMerge {
 				t.Errorf("%v < %v", maxMerge, minMerge)
 			}
-
 			vertexMerge = minMerge + smallFraction()*(maxMerge-minMerge)
 			maxPerturb = 0.5 * math.Min(edgeFraction*(vertexMerge-minMerge), maxMerge-vertexMerge)
 		}
@@ -225,8 +384,6 @@ func runTestCase(t *testing.T, test TestCase) bool {
 			maxError += 1e-15
 		}
 
-		fmt.Println("loops", loops)
-
 		ok0 := findMissingLoops(loops, expected, m, maxSplits, maxError, "Actual")
 		ok1 := findMissingLoops(expected, loops, m, maxSplits, maxError, "Expected")
 		ok2 := unexpectedUnusedEdgeCount(len(unusedEdges), test.numUnusedEdges, maxSplits)
@@ -247,7 +404,8 @@ func runTestCase(t *testing.T, test TestCase) bool {
 				s1.Angle(maxPerturb).Degrees(),
 				options.vertex_merge_radius.Degrees(),
 				options.edge_splice_fraction,
-				s1.Angle(minEdge).Degrees(), s1.Angle(maxError).Degrees())
+				s1.Angle(minEdge).Degrees(),
+				s1.Angle(maxError).Degrees())
 			return false
 		}
 	}
@@ -303,7 +461,8 @@ func Perturb(x Point, maxPerturb float64) Point {
 	if maxPerturb == 0 {
 		return x
 	}
-	return samplePoint(CapFromCenterHeight(Point{x.Normalize()}, maxPerturb*(math.Pi/180)))
+	s2cap := CapFromCenterAngle(Point{x.Normalize()}, s1.Angle(maxPerturb))
+	return samplePoint(s2cap)
 }
 
 func addChain(chain Chain, m r3.Matrix, maxSplits int,
@@ -321,7 +480,7 @@ func addChain(chain Chain, m r3.Matrix, maxSplits int,
 }
 
 func addEdge(v0, v1 Point, maxSplits int, maxPerturb, minEdge float64, builder *PolygonBuilder) {
-	length := float64(v0.Angle(v1.Vector))
+	length := v0.Distance(v1).Radians()
 	if maxSplits > 0 && oneIn(2) && length >= 2*minEdge {
 		// Choose an interpolation parameter such that the length of
 		// each piece is at least minEdge.
@@ -354,7 +513,6 @@ func findMissingLoops(actual, expected []*Loop,
 	m r3.Matrix, maxSplits int, maxError float64, label string) bool {
 	// Dump any loops from "actual" that are not present in "expected".
 	found := false
-	fmt.Println(label, actual, expected)
 	for i, loop := range actual {
 		if findLoop(loop, expected, maxSplits, maxError) {
 			continue

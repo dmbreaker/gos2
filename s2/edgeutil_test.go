@@ -92,6 +92,11 @@ func TestWedges(t *testing.T) {
 			false, true, WEDGE_IS_PROPERLY_CONTAINED},
 	}
 	for _, test := range tests {
+		test.a0 = Point{test.a0.Normalize()}
+		test.ab1 = Point{test.ab1.Normalize()}
+		test.a2 = Point{test.a2.Normalize()}
+		test.b0 = Point{test.b0.Normalize()}
+		test.b2 = Point{test.b2.Normalize()}
 		got := WedgeContains(test.a0, test.ab1, test.a2, test.b0, test.b2)
 		if got != test.contains {
 			t.Errorf("WedgeContains(): got %v, want %v", got, test.contains)
@@ -284,6 +289,25 @@ func CompareResult(t *testing.T, actual, expected int) {
 	} else {
 		if expected != actual {
 			t.Errorf("expected = %v, actual = %v", expected, actual)
+		}
+	}
+}
+
+func TestCollinearEdgesThatDontTouch(t *testing.T) {
+	for iter := 0; iter < 1000; iter++ {
+		a := randomPoint()
+		d := randomPoint()
+		b := EdgeInterpolate(0.05, a, d)
+		c := EdgeInterpolate(0.95, a, d)
+		if got := RobustCrossing(a, b, c, d); got >= 0 {
+			t.Errorf("RobustCrossing() == %v >= 0", got)
+		}
+		crosser := NewEdgeCrosser(&a, &b, &c)
+		if got := crosser.RobustCrossing(&d); got >= 0 {
+			t.Errorf("crosser.RobustCrossing(%v) == %v >= 0", d, got)
+		}
+		if got := crosser.RobustCrossing(&c); got >= 0 {
+			t.Errorf("crosser.RobustCrossing(%v) == %v >= 0", c, got)
 		}
 	}
 }
