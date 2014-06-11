@@ -41,6 +41,7 @@ func CellFromCellID(id CellID) Cell {
 	return cell
 }
 
+func (c Cell) Id() CellID           { return c.id }
 func (c Cell) IsLeaf() bool         { return c.level == maxLevel }
 func (c Cell) AverageArea() float64 { return AverageArea(int(c.level)) }
 
