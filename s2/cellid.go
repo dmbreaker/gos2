@@ -477,6 +477,8 @@ func cellIDFromPoint(p Point) CellID {
 	return cellIDFromFaceIJ(f, i, j)
 }
 
+func CellIDFromPoint(p Point) CellID { return cellIDFromPoint(p) }
+
 // Constants related to the bit mangling in the Cell ID.
 const (
 	lookupBits = 4
